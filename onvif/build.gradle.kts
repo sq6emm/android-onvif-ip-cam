@@ -1,4 +1,5 @@
 plugins {
+    `java-library`
     alias(libs.plugins.kotlin.jvm)
 }
 
@@ -7,7 +8,7 @@ kotlin {
 }
 
 dependencies {
-    implementation(project(":rtsp"))
+    api(project(":rtsp"))
     testImplementation(libs.junit)
     testImplementation(kotlin("test-junit"))
 }

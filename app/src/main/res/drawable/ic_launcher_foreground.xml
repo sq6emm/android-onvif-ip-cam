@@ -1,0 +1,14 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- camera body -->
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M30,40h36a4,4 0,0 1,4 4v20a4,4 0,0 1,-4 4h-36a4,4 0,0 1,-4 -4v-20a4,4 0,0 1,4 -4z" />
+    <!-- lens -->
+    <path android:fillColor="#1565C0"
+        android:pathData="M48,54m-8,0a8,8 0,1 1,16 0a8,8 0,1 1,-16 0" />
+    <!-- side wedge -->
+    <path android:fillColor="#FFFFFF" android:pathData="M72,48l10,-6v24l-10,-6z" />
+    <!-- recording dot -->
+    <path android:fillColor="#E53935" android:pathData="M34,46m-2.5,0a2.5,2.5 0,1 1,5 0a2.5,2.5 0,1 1,-5 0" />
+</vector>

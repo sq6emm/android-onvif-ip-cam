@@ -1,5 +1,9 @@
 package pl.arhea.onvifipcam.devserver
 
+import pl.arhea.onvifipcam.onvif.EventHub
+import pl.arhea.onvifipcam.onvif.OnvifServer
+import pl.arhea.onvifipcam.onvif.PresetStore
+import pl.arhea.onvifipcam.onvif.WsDiscovery
 import pl.arhea.onvifipcam.rtsp.Credentials
 import pl.arhea.onvifipcam.rtsp.DigestAuth
 import pl.arhea.onvifipcam.rtsp.Logger
@@ -7,6 +11,9 @@ import pl.arhea.onvifipcam.rtsp.RtspServer
 import pl.arhea.onvifipcam.rtsp.StreamEndpoint
 import pl.arhea.onvifipcam.rtsp.VideoCodec
 import java.io.File
+import java.net.Inet4Address
+import java.net.NetworkInterface
+import kotlin.concurrent.thread
 
 /**
  * JVM test harness: serves files from [dataDir] through the same RTSP/ONVIF code the app uses.
@@ -30,6 +37,28 @@ fun main() {
     VideoFileSource(File(dataDir, mainFile), mainCodec, 25, 1920, 1080).start(main)
     VideoFileSource(File(dataDir, "sub.h264"), VideoCodec.H264, 25, 640, 360).start(sub)
     AudioFileSource(File(dataDir, "audio.aac")).start(listOf(main, sub))
+
+    val addresses = {
+        NetworkInterface.getNetworkInterfaces().toList().filter { it.isUp && !it.isLoopback }
+            .flatMap { it.inetAddresses.toList() }.filterIsInstance<Inet4Address>().map { it.hostAddress }
+    }
+    val device = FakeDevice(mainCodec, dataDir)
+    val onvif = OnvifServer(device, auth, EventHub(Logger.STDOUT), PresetStore.Memory(), addresses, Logger.STDOUT)
+    onvif.start()
+    onvif.publishMotion(false)
+    WsDiscovery(device, addresses, Logger.STDOUT).start()
+
+    // Toggle motion every MOTION_PERIOD seconds so event subscribers have something to receive.
+    val period = (System.getenv("MOTION_PERIOD") ?: "15").toLong()
+    thread(isDaemon = true) {
+        var active = false
+        while (true) {
+            Thread.sleep(period * 1000)
+            active = !active
+            println("motion -> $active")
+            onvif.publishMotion(active)
+        }
+    }
 
     println("devserver running")
     Thread.currentThread().join()

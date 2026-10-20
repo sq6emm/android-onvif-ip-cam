@@ -106,6 +106,7 @@ class CameraService : Service() {
             else -> {
                 if (!enterForeground()) return START_NOT_STICKY
                 val restart = intent?.action == ACTION_RESTART
+                if (restart) logger.log("Restart requested: settings changed in the app")
                 worker.execute {
                     if (restart || pipeline == null) {
                         stopStreaming()
@@ -194,8 +195,9 @@ class CameraService : Service() {
             r.start()
             rtsp = r
 
-            val device = AppOnvifDevice(s, p) {
+            val device = AppOnvifDevice(s, p) { change ->
                 // Encoder changes from ONVIF clients: restart after the SOAP response has been sent.
+                logger.log("Restart requested by ONVIF client: $change")
                 worker.schedule({ restartFromWorker() }, 500, TimeUnit.MILLISECONDS)
             }
             val presets = object : PresetStore {

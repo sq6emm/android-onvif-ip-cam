@@ -18,7 +18,7 @@ import pl.arhea.onvifipcam.settings.SettingsStore
 class AppOnvifDevice(
     private val settings: CamSettings,
     private val pipeline: CameraPipeline,
-    private val requestRestart: () -> Unit,
+    private val requestRestart: (String) -> Unit,
 ) : OnvifDevice {
     override val info = DeviceInfo(
         manufacturer = Build.MANUFACTURER.replaceFirstChar { it.uppercase() },
@@ -69,7 +69,7 @@ class AppOnvifDevice(
         val gop = change.keyframeIntervalS?.coerceIn(1, 10) ?: settings.keyframeIntervalS
         if (next == cur && gop == settings.keyframeIntervalS) return true
         SettingsStore.update { if (main) it.copy(main = next, keyframeIntervalS = gop) else it.copy(sub = next, keyframeIntervalS = gop) }
-        requestRestart()
+        requestRestart("$encoderToken ${next.resolution} ${next.fps}fps ${next.bitrateKbps}kbps ${next.codec} gop ${gop}s")
         return true
     }
 

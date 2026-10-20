@@ -17,7 +17,7 @@ interface PresetStore {
     }
 }
 
-class PtzService(private val store: PresetStore) {
+class PtzService(private val store: PresetStore, private val control: () -> PtzControl?) {
     private val presets = ConcurrentHashMap<String, Preset>()
     @Volatile private var home = Preset("home", "Home", 0f, 0f, 0f)
 
@@ -29,6 +29,39 @@ class PtzService(private val store: PresetStore) {
                 if (preset.token == HOME_TOKEN) home = preset else presets[preset.token] = preset
             }
         }
+    }
+
+    fun presets(): List<Preset> = presets.values.sortedBy { it.token.toIntOrNull() ?: Int.MAX_VALUE }
+
+    /** Saves the current position. [token] null = next free slot. Returns the token or null if full. */
+    fun setPreset(name: String?, token: String? = null): String? {
+        val pos = control()?.position() ?: return null
+        val t = token?.takeIf { it.isNotEmpty() }
+            ?: (1..MAX_PRESETS).map { it.toString() }.firstOrNull { !presets.containsKey(it) }
+            ?: return null
+        val n = name?.takeIf { it.isNotBlank() } ?: presets[t]?.name ?: "Preset $t"
+        presets[t] = Preset(t, n, pos.pan, pos.tilt, pos.zoom)
+        persist()
+        return t
+    }
+
+    fun removePreset(token: String): Boolean = (presets.remove(token) != null).also { if (it) persist() }
+
+    fun gotoPreset(token: String): Boolean {
+        val p = presets[token] ?: return false
+        control()?.absoluteMove(p.pan, p.tilt, p.zoom)
+        return true
+    }
+
+    fun gotoHome() {
+        val h = home
+        control()?.absoluteMove(h.pan, h.tilt, h.zoom)
+    }
+
+    fun setHome() {
+        val p = control()?.position() ?: return
+        home = Preset(HOME_TOKEN, "Home", p.pan, p.tilt, p.zoom)
+        persist()
     }
 
     fun handle(c: Ctx): String? {
@@ -85,39 +118,29 @@ class PtzService(private val store: PresetStore) {
                     "<tt:UtcTime>${Time.iso()}</tt:UtcTime></tptz:PTZStatus></tptz:GetStatusResponse>"
             }
             "GetPresets" -> "<tptz:GetPresetsResponse>" +
-                presets.values.sortedBy { it.token.toIntOrNull() ?: Int.MAX_VALUE }.joinToString("") { p ->
+                presets().joinToString("") { p ->
                     "<tptz:Preset token=\"${esc(p.token)}\"><tt:Name>${esc(p.name)}</tt:Name>" +
                         "<tt:PTZPosition>${positionBody(p.pan, p.tilt, p.zoom)}</tt:PTZPosition></tptz:Preset>"
                 } + "</tptz:GetPresetsResponse>"
             "SetPreset" -> {
-                val pos = ptz.position()
-                val token = op.childText("PresetToken")?.takeIf { it.isNotEmpty() }
-                    ?: (1..MAX_PRESETS).map { it.toString() }.firstOrNull { !presets.containsKey(it) }
+                val token = setPreset(op.childText("PresetName"), op.childText("PresetToken"))
                     ?: throw SoapFault("Receiver", "ter:TooManyPresets", "Maximum number of presets reached")
-                val name = op.childText("PresetName")?.takeIf { it.isNotEmpty() } ?: presets[token]?.name ?: "Preset $token"
-                presets[token] = Preset(token, name, pos.pan, pos.tilt, pos.zoom)
-                persist()
                 "<tptz:SetPresetResponse><tptz:PresetToken>${esc(token)}</tptz:PresetToken></tptz:SetPresetResponse>"
             }
             "RemovePreset" -> {
-                presets.remove(op.childText("PresetToken")) ?: throw SoapFault("Sender", "ter:NoToken", "Preset does not exist")
-                persist()
+                if (!removePreset(op.childText("PresetToken") ?: "")) throw SoapFault("Sender", "ter:NoToken", "Preset does not exist")
                 "<tptz:RemovePresetResponse/>"
             }
             "GotoPreset" -> {
-                val p = presets[op.childText("PresetToken")] ?: throw SoapFault("Sender", "ter:NoToken", "Preset does not exist")
-                ptz.absoluteMove(p.pan, p.tilt, p.zoom)
+                if (!gotoPreset(op.childText("PresetToken") ?: "")) throw SoapFault("Sender", "ter:NoToken", "Preset does not exist")
                 "<tptz:GotoPresetResponse/>"
             }
             "GotoHomePosition" -> {
-                val h = home
-                ptz.absoluteMove(h.pan, h.tilt, h.zoom)
+                gotoHome()
                 "<tptz:GotoHomePositionResponse/>"
             }
             "SetHomePosition" -> {
-                val p = ptz.position()
-                home = Preset(HOME_TOKEN, "Home", p.pan, p.tilt, p.zoom)
-                persist()
+                setHome()
                 "<tptz:SetHomePositionResponse/>"
             }
             else -> null

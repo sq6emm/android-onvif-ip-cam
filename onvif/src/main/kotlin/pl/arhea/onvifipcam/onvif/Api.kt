@@ -55,6 +55,7 @@ interface OnvifDevice {
     fun changeEncoder(encoderToken: String, change: EncoderChange): Boolean
     val ptz: PtzControl?
     val imaging: ImagingControl?
+    val configuration: ConfigControl
 }
 
 data class PtzPosition(
@@ -95,4 +96,46 @@ data class ImagingSettings(
 interface ImagingControl {
     fun settings(): ImagingSettings
     fun apply(brightness: Float?, autoFocus: Boolean?, focusPosition: Float?, light: Boolean?)
+}
+
+/** One selectable camera, exposed as an ONVIF video source. */
+data class VideoSourceInfo(val token: String, val name: String, val width: Int, val height: Int)
+
+/** Device-level configuration that ONVIF clients can read and change (mirrors the app settings). */
+data class CameraConfig(
+    val name: String,
+    val username: String,
+    val sources: List<VideoSourceInfo>,
+    val currentSource: String,
+    /** 0, 90, 180, 270 */
+    val rotation: Int,
+    val osdEnabled: Boolean,
+    val audioEnabled: Boolean,
+    val motionEnabled: Boolean,
+    /** 0..100 */
+    val motionSensitivity: Int,
+    val httpPort: Int,
+    val rtspPort: Int,
+)
+
+/** Requested configuration change; null fields stay as they are. */
+data class ConfigChange(
+    val name: String? = null,
+    val username: String? = null,
+    val password: String? = null,
+    val source: String? = null,
+    val rotation: Int? = null,
+    val osdEnabled: Boolean? = null,
+    val audioEnabled: Boolean? = null,
+    val motionEnabled: Boolean? = null,
+    val motionSensitivity: Int? = null,
+    val httpPort: Int? = null,
+    val rtspPort: Int? = null,
+)
+
+/** Implemented by the device to expose [CameraConfig]; changes are persisted and applied (possibly by a restart). */
+interface ConfigControl {
+    fun config(): CameraConfig
+    /** Returns false if the change is invalid. */
+    fun change(change: ConfigChange): Boolean
 }

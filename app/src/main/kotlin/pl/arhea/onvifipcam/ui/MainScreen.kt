@@ -26,6 +26,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -39,6 +41,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -126,6 +130,11 @@ fun MainScreen(
                 Switch(checked = showPreview, onCheckedChange = { showPreview = it })
             }
 
+            if (status.running) {
+                ImagingCard()
+                PtzCard()
+            }
+
             status.error?.let { ErrorCard(it) }
             status.cameraStatus?.let { ErrorCard(it) }
             if (!env.hasCamera) ErrorCard("Aplikacja potrzebuje uprawnienia do kamery. Naciśnij „Uruchom kamerę”.")
@@ -187,6 +196,120 @@ private fun PreviewSurface(modifier: Modifier) {
         modifier = modifier,
         factory = { ctx -> SurfaceView(ctx).apply { holder.addCallback(callback) } },
     )
+}
+
+/** Torch, brightness and focus, applied live through the same control ONVIF Imaging uses. */
+@Composable
+private fun ImagingCard() {
+    val imaging = CameraService.imaging ?: return
+    val initial = remember(imaging) { imaging.settings() }
+    var light by remember(imaging) { mutableStateOf(initial.light) }
+    var brightness by remember(imaging) { mutableStateOf(initial.brightness) }
+    var autoFocus by remember(imaging) { mutableStateOf(initial.autoFocus) }
+    var focus by remember(imaging) { mutableStateOf(initial.focusPosition) }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Text("Obraz", fontWeight = FontWeight.SemiBold)
+            if (initial.hasLight) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Lampa (latarka)", Modifier.weight(1f))
+                    Switch(checked = light, onCheckedChange = {
+                        light = it
+                        imaging.apply(null, null, null, it)
+                    })
+                }
+            }
+            Text("Jasność: ${brightness.toInt()}", style = MaterialTheme.typography.bodyMedium)
+            Slider(
+                value = brightness,
+                onValueChange = { brightness = it },
+                onValueChangeFinished = { imaging.apply(brightness, null, null, null) },
+                valueRange = 0f..100f,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Autofokus", Modifier.weight(1f))
+                Switch(checked = autoFocus, onCheckedChange = {
+                    autoFocus = it
+                    imaging.apply(null, it, null, null)
+                })
+            }
+            if (!autoFocus) {
+                Text("Ostrość: ${if (focus < 0.01f) "nieskończoność" else "%.0f%%".format(focus * 100)}", style = MaterialTheme.typography.bodyMedium)
+                Slider(
+                    value = focus,
+                    onValueChange = { focus = it },
+                    onValueChangeFinished = { imaging.apply(null, false, focus, null) },
+                    valueRange = 0f..1f,
+                )
+            }
+        }
+    }
+}
+
+/** Digital PTZ: hold an arrow to move, zoom buttons, home position and presets (shared with ONVIF). */
+@Composable
+private fun PtzCard() {
+    val ptz = CameraService.ptz ?: return
+    val presets = CameraService.presets ?: return
+    var list by remember(presets) { mutableStateOf(presets.presets()) }
+    var newName by remember { mutableStateOf("") }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("PTZ (cyfrowy)", fontWeight = FontWeight.SemiBold)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    HoldButton("▲") { ptz.continuousMove(0f, 0.5f, 0f, 10_000) }
+                    Row {
+                        HoldButton("◀") { ptz.continuousMove(-0.5f, 0f, 0f, 10_000) }
+                        Spacer(Modifier.size(48.dp))
+                        HoldButton("▶") { ptz.continuousMove(0.5f, 0f, 0f, 10_000) }
+                    }
+                    HoldButton("▼") { ptz.continuousMove(0f, -0.5f, 0f, 10_000) }
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        HoldButton("−") { ptz.continuousMove(0f, 0f, -0.5f, 10_000) }
+                        HoldButton("+") { ptz.continuousMove(0f, 0f, 0.5f, 10_000) }
+                    }
+                    OutlinedButton(onClick = { presets.gotoHome() }) { Text("Pozycja domowa") }
+                    TextButton(onClick = { presets.setHome() }) { Text("Ustaw jako domową") }
+                }
+            }
+            for (p in list) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(p.name, Modifier.weight(1f))
+                    TextButton(onClick = { presets.gotoPreset(p.token) }) { Text("Idź") }
+                    TextButton(onClick = { presets.removePreset(p.token); list = presets.presets() }) { Text("Usuń") }
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(newName, { newName = it }, Modifier.weight(1f), label = { Text("Nazwa presetu") }, singleLine = true)
+                TextButton(onClick = {
+                    presets.setPreset(newName.ifBlank { null })
+                    newName = ""
+                    list = presets.presets()
+                }) { Text("Zapisz") }
+            }
+        }
+    }
+}
+
+/** Button that runs [onPress] while held and stops the PTZ on release. */
+@Composable
+private fun HoldButton(label: String, onPress: () -> Unit) {
+    Box(
+        Modifier
+            .size(48.dp)
+            .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
+            .pointerInput(label) {
+                detectTapGestures(onPress = {
+                    onPress()
+                    tryAwaitRelease()
+                    CameraService.ptz?.stop(panTilt = true, zoom = true)
+                })
+            },
+        contentAlignment = Alignment.Center,
+    ) { Text(label, fontSize = 20.sp, color = MaterialTheme.colorScheme.onSecondaryContainer) }
 }
 
 @Composable

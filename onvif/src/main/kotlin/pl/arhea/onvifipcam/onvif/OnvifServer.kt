@@ -20,9 +20,13 @@ class OnvifServer(
     private val deviceService = DeviceService(addresses)
     private val media = MediaService()
     private val media2 = Media2Service()
-    private val ptz = PtzService(presets)
+    private val ptz = PtzService(presets) { device.ptz }
     private val imaging = ImagingService()
     private val eventService = EventService(events)
+    private val analytics = AnalyticsService()
+
+    /** PTZ presets/home, shared with the app UI. */
+    val presets: PtzService get() = ptz
 
     fun start() = http.start()
 
@@ -85,6 +89,7 @@ class OnvifServer(
             Ns.TR2 -> media2.handle(c)
             Ns.TPTZ -> ptz.handle(c)
             Ns.TIMG -> imaging.handle(c)
+            Ns.TAN -> analytics.handle(c)
             Ns.TEV, Ns.WSNT -> eventService.handle(c, subId)
             else -> null
         }
@@ -102,7 +107,7 @@ class OnvifServer(
     }
 
     fun publishMotion(active: Boolean) {
-        EventService.motionEvents(active).forEach { events.publish(it) }
+        EventService.motionEvents(active, device.configuration.config().currentSource).forEach { events.publish(it) }
     }
 
     companion object {

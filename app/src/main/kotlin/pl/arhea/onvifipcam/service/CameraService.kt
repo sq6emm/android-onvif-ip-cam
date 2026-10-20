@@ -195,7 +195,7 @@ class CameraService : Service() {
             r.start()
             rtsp = r
 
-            val device = AppOnvifDevice(s, p) { change ->
+            val device = AppOnvifDevice(this, s, p) { change ->
                 // Encoder changes from ONVIF clients: restart after the SOAP response has been sent.
                 logger.log("Restart requested by ONVIF client: $change")
                 worker.schedule({ restartFromWorker() }, 500, TimeUnit.MILLISECONDS)
@@ -208,6 +208,7 @@ class CameraService : Service() {
             o.start()
             o.publishMotion(false)
             onvif = o
+            presetsService = o.presets
 
             discovery = runCatching { WsDiscovery(device, Net::localIpv4, logger).also { it.start() } }
                 .onFailure { logger.log("WS-Discovery failed: $it") }
@@ -239,6 +240,7 @@ class CameraService : Service() {
         discovery = null
         onvif?.stop()
         onvif = null
+        presetsService = null
         rtsp?.stop()
         rtsp = null
         mainEndpoint.reset()
@@ -376,6 +378,17 @@ class CameraService : Service() {
         }
 
         val isRunning: Boolean get() = instance != null
+
+        @Volatile private var presetsService: pl.arhea.onvifipcam.onvif.PtzService? = null
+
+        /** PTZ presets/home shared with ONVIF, or null when stopped. */
+        val presets: pl.arhea.onvifipcam.onvif.PtzService? get() = presetsService
+
+        /** Live digital PTZ of the running pipeline, or null when stopped. */
+        val ptz: pl.arhea.onvifipcam.onvif.PtzControl? get() = instance?.pipeline?.ptz
+
+        /** Live imaging controls (torch, brightness) of the running pipeline, or null when stopped. */
+        val imaging: pl.arhea.onvifipcam.onvif.ImagingControl? get() = instance?.pipeline?.imaging
 
         /** Attaches the in-app preview; null detaches (blocks until the renderer released it). */
         fun setPreview(surface: Surface?, width: Int, height: Int) {

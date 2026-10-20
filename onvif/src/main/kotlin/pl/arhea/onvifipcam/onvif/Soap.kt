@@ -22,13 +22,14 @@ object Ns {
     const val TPTZ = "http://www.onvif.org/ver20/ptz/wsdl"
     const val TIMG = "http://www.onvif.org/ver20/imaging/wsdl"
     const val TEV = "http://www.onvif.org/ver10/events/wsdl"
+    const val TAN = "http://www.onvif.org/ver20/analytics/wsdl"
     const val WSNT = "http://docs.oasis-open.org/wsn/b-2"
     const val WSA = "http://www.w3.org/2005/08/addressing"
     const val WSSE = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"
 
     /** Namespace declarations put on every response envelope. */
     val DECLS = listOf(
-        "tt" to TT, "tds" to TDS, "trt" to TRT, "tr2" to TR2, "tptz" to TPTZ, "timg" to TIMG, "tev" to TEV,
+        "tt" to TT, "tds" to TDS, "trt" to TRT, "tr2" to TR2, "tptz" to TPTZ, "timg" to TIMG, "tev" to TEV, "tan" to TAN,
         "wsnt" to WSNT, "wsa" to WSA, "tns1" to "http://www.onvif.org/ver10/topics",
         "wstop" to "http://docs.oasis-open.org/wsn/t-1", "ter" to "http://www.onvif.org/ver10/error",
         "xsd" to "http://www.w3.org/2001/XMLSchema", "xsi" to "http://www.w3.org/2001/XMLSchema-instance",

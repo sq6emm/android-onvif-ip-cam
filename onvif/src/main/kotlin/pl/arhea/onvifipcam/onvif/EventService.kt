@@ -261,17 +261,17 @@ class EventService(private val hub: EventHub) {
                 "PersistentNotificationStorage=\"false\"/>"
 
         /** Both motion topics Home Assistant and NVRs understand. */
-        fun motionEvents(active: Boolean): List<Event> = listOf(
+        fun motionEvents(active: Boolean, videoSource: String): List<Event> = listOf(
             Event(
                 "tns1:RuleEngine/CellMotionDetector/Motion",
                 listOf(
                     "VideoSourceConfigurationToken" to MediaXml.VSC,
-                    "VideoAnalyticsConfigurationToken" to "vac0",
-                    "Rule" to "MotionDetectorRule",
+                    "VideoAnalyticsConfigurationToken" to AnalyticsService.CONFIG,
+                    "Rule" to AnalyticsService.RULE_NAME,
                 ),
                 listOf("IsMotion" to active.toString()),
             ),
-            Event("tns1:VideoSource/MotionAlarm", listOf("Source" to MediaXml.VIDEO_SOURCE), listOf("State" to active.toString())),
+            Event("tns1:VideoSource/MotionAlarm", listOf("Source" to videoSource), listOf("State" to active.toString())),
         )
     }
 }

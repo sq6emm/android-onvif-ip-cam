@@ -14,6 +14,26 @@ ONVIF Profile S with digital PTZ, motion events, snapshots and WS-Discovery. Des
 The user is `admin`; a random password is generated on first start and shown in the app.
 An empty password disables authentication.
 
+## Settings: app and ONVIF
+Every setting can be changed both in the app and over ONVIF:
+
+| Setting | App | ONVIF |
+|---|---|---|
+| Resolution, fps, bitrate, codec, GOP | Settings | Media `SetVideoEncoderConfiguration` (Media2 for H.265) |
+| Camera (front/back/...) | Settings | Media `SetVideoSourceConfiguration` (`SourceToken`, sources from `GetVideoSources`) |
+| Rotation | Settings | Media `SetVideoSourceConfiguration` (`Extension/Rotate`) |
+| Date/time OSD | Settings | Media `CreateOSD` / `DeleteOSD` / `GetOSDs` |
+| Audio on/off | Settings | Media `Add/RemoveAudioEncoderConfiguration` (Media2 `Add/RemoveConfiguration`) |
+| Motion detection, sensitivity | Settings | Analytics `CreateRules` / `DeleteRules` / `ModifyRules` (`MotionDetectorRule`, `Sensitivity` 0..100) |
+| Camera name | Settings | Device `SetScopes` (name scope) or `SetHostname` |
+| User, password | Settings | Device `SetUser` |
+| Ports | Settings | Device `SetNetworkProtocols` |
+| Torch, brightness, focus | Main screen | Imaging `SetImagingSettings` (`IrCutFilter` OFF = torch on), `Move` |
+| PTZ, presets, home | Main screen | PTZ service |
+| Autostart, PTZ zoom headroom | Settings | — (no ONVIF equivalent) |
+
+Most changes restart streaming for about a second; credentials, imaging and PTZ apply live.
+
 ## Frigate
 ```yaml
 go2rtc:

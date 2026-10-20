@@ -1,6 +1,7 @@
 package pl.arhea.onvifipcam.onvif
 
 import pl.arhea.onvifipcam.onvif.Soap.esc
+import java.net.URLDecoder
 import java.net.URLEncoder
 import java.security.MessageDigest
 import java.time.ZoneId
@@ -37,6 +38,7 @@ object Paths {
     const val PTZ = "ptz_service"
     const val IMAGING = "imaging_service"
     const val EVENTS = "events_service"
+    const val ANALYTICS = "analytics_service"
 }
 
 class DeviceService(private val addresses: () -> List<String>) {
@@ -58,23 +60,65 @@ class DeviceService(private val addresses: () -> List<String>) {
             } + "</tds:GetScopesResponse>"
         "GetHostname" -> "<tds:GetHostnameResponse><tds:HostnameInformation><tt:FromDHCP>false</tt:FromDHCP>" +
             "<tt:Name>${esc(hostname(c.device.name))}</tt:Name></tds:HostnameInformation></tds:GetHostnameResponse>"
+        "SetHostname" -> {
+            val name = c.op.childText("Name")?.trim()
+            if (name.isNullOrEmpty() || !c.device.configuration.change(ConfigChange(name = name))) {
+                throw Soap.invalidArg("ter:InvalidHostname", "Invalid hostname")
+            }
+            "<tds:SetHostnameResponse/>"
+        }
+        "SetScopes", "AddScopes" -> {
+            // The only configurable scope we honour is the name scope.
+            val name = c.op.children("Scopes").map { it.text() }
+                .firstOrNull { it.startsWith(NAME_SCOPE) }
+                ?.removePrefix(NAME_SCOPE)?.let { URLDecoder.decode(it, "UTF-8") }?.trim()
+            if (!name.isNullOrEmpty()) c.device.configuration.change(ConfigChange(name = name))
+            "<tds:${c.soap.opName}Response/>"
+        }
+        "GetUsers" -> "<tds:GetUsersResponse><tds:User><tt:Username>${esc(c.device.configuration.config().username)}</tt:Username>" +
+            "<tt:UserLevel>Administrator</tt:UserLevel></tds:User></tds:GetUsersResponse>"
+        "SetUser", "CreateUsers" -> {
+            // Single-user device: SetUser/CreateUsers replace the credentials.
+            val u = c.op.child("User") ?: throw Soap.invalidArg("ter:InvalidArgVal", "missing User")
+            val name = u.childText("Username")?.trim()
+            val pw = u.childText("Password")
+            if (name.isNullOrEmpty() || !c.device.configuration.change(ConfigChange(username = name, password = pw))) {
+                throw Soap.invalidArg("ter:InvalidArgVal", "Invalid user")
+            }
+            "<tds:${c.soap.opName}Response/>"
+        }
+        "DeleteUsers" -> throw SoapFault("Sender", "ter:FixedUser", "The only user cannot be deleted")
+        "SetNetworkProtocols" -> {
+            var http: Int? = null
+            var rtsp: Int? = null
+            for (np in c.op.children("NetworkProtocols")) {
+                val port = np.childText("Port")?.toIntOrNull() ?: continue
+                when (np.childText("Name")?.uppercase()) {
+                    "HTTP" -> http = port
+                    "RTSP" -> rtsp = port
+                }
+            }
+            if (!c.device.configuration.change(ConfigChange(httpPort = http, rtspPort = rtsp))) {
+                throw Soap.invalidArg("ter:InvalidArgVal", "Invalid port")
+            }
+            "<tds:SetNetworkProtocolsResponse/>"
+        }
         "GetNetworkInterfaces" -> getNetworkInterfaces(c)
         "GetNetworkProtocols" -> "<tds:GetNetworkProtocolsResponse>" +
-            "<tds:NetworkProtocols><tt:Name>HTTP</tt:Name><tt:Enabled>true</tt:Enabled><tt:Port>${c.device.httpPort}</tt:Port></tds:NetworkProtocols>" +
-            "<tds:NetworkProtocols><tt:Name>RTSP</tt:Name><tt:Enabled>true</tt:Enabled><tt:Port>${c.device.rtspPort}</tt:Port></tds:NetworkProtocols>" +
+            "<tds:NetworkProtocols><tt:Name>HTTP</tt:Name><tt:Enabled>true</tt:Enabled><tt:Port>${c.device.configuration.config().httpPort}</tt:Port></tds:NetworkProtocols>" +
+            "<tds:NetworkProtocols><tt:Name>RTSP</tt:Name><tt:Enabled>true</tt:Enabled><tt:Port>${c.device.configuration.config().rtspPort}</tt:Port></tds:NetworkProtocols>" +
             "</tds:GetNetworkProtocolsResponse>"
         "GetDNS" -> "<tds:GetDNSResponse><tds:DNSInformation><tt:FromDHCP>true</tt:FromDHCP></tds:DNSInformation></tds:GetDNSResponse>"
         "GetNTP" -> "<tds:GetNTPResponse><tds:NTPInformation><tt:FromDHCP>false</tt:FromDHCP>" +
             "<tt:NTPManual><tt:Type>DNS</tt:Type><tt:DNSname>time.android.com</tt:DNSname></tt:NTPManual></tds:NTPInformation></tds:GetNTPResponse>"
         "GetNetworkDefaultGateway" -> "<tds:GetNetworkDefaultGatewayResponse><tds:NetworkGateway/></tds:GetNetworkDefaultGatewayResponse>"
         "GetDiscoveryMode" -> "<tds:GetDiscoveryModeResponse><tds:DiscoveryMode>Discoverable</tds:DiscoveryMode></tds:GetDiscoveryModeResponse>"
-        "GetUsers" -> "<tds:GetUsersResponse><tds:User><tt:Username>admin</tt:Username><tt:UserLevel>Administrator</tt:UserLevel></tds:User></tds:GetUsersResponse>"
         "GetWsdlUrl" -> "<tds:GetWsdlUrlResponse><tds:WsdlUrl>http://www.onvif.org/Documents/Specifications.aspx</tds:WsdlUrl></tds:GetWsdlUrlResponse>"
         "GetEndpointReference" -> "<tds:GetEndpointReferenceResponse><tds:GUID>urn:uuid:${c.device.uuid}</tds:GUID></tds:GetEndpointReferenceResponse>"
         "GetRelayOutputs" -> "<tds:GetRelayOutputsResponse/>"
         "GetZeroConfiguration" -> "<tds:GetZeroConfigurationResponse><tds:ZeroConfiguration><tt:InterfaceToken>eth0</tt:InterfaceToken>" +
             "<tt:Enabled>false</tt:Enabled></tds:ZeroConfiguration></tds:GetZeroConfigurationResponse>"
-        "SetSystemDateAndTime", "SetNTP", "SetDNS", "SetHostname", "SetScopes", "AddScopes", "SetDiscoveryMode" ->
+        "SetSystemDateAndTime", "SetNTP", "SetDNS", "SetDiscoveryMode" ->
             "<tds:${c.soap.opName}Response/>"
         "SystemReboot" -> "<tds:SystemRebootResponse><tds:Message>Rebooting is not supported; restart the app instead</tds:Message></tds:SystemRebootResponse>"
         else -> null
@@ -119,6 +163,12 @@ class DeviceService(private val addresses: () -> List<String>) {
         val cats = c.op.children("Category").map { it.text() }.ifEmpty { listOf("All") }
         fun want(cat: String) = "All" in cats || cat in cats
         val sb = StringBuilder("<tds:GetCapabilitiesResponse><tds:Capabilities>")
+        if (want("Analytics")) {
+            sb.append(
+                "<tt:Analytics><tt:XAddr>${c.xaddr(Paths.ANALYTICS)}</tt:XAddr><tt:RuleSupport>true</tt:RuleSupport>" +
+                    "<tt:AnalyticsModuleSupport>false</tt:AnalyticsModuleSupport></tt:Analytics>",
+            )
+        }
         if (want("Device")) {
             sb.append(
                 "<tt:Device><tt:XAddr>${c.xaddr(Paths.DEVICE)}</tt:XAddr>" +
@@ -174,6 +224,7 @@ class DeviceService(private val addresses: () -> List<String>) {
         sb.append(svc(Ns.TEV, Paths.EVENTS, 2, 40, EventService.capabilities()))
         if (c.device.ptz != null) sb.append(svc(Ns.TPTZ, Paths.PTZ, 2, 40, PtzService.capabilities()))
         if (c.device.imaging != null) sb.append(svc(Ns.TIMG, Paths.IMAGING, 2, 40, ImagingService.capabilities()))
+        sb.append(svc(Ns.TAN, Paths.ANALYTICS, 2, 40, AnalyticsService.capabilities()))
         sb.append("</tds:GetServicesResponse>")
         return sb.toString()
     }
@@ -188,6 +239,8 @@ class DeviceService(private val addresses: () -> List<String>) {
     }
 
     companion object {
+        private const val NAME_SCOPE = "onvif://www.onvif.org/name/"
+
         fun scopes(d: OnvifDevice): List<Pair<Boolean, String>> {
             val enc = { s: String -> URLEncoder.encode(s, "UTF-8").replace("+", "%20") }
             return listOfNotNull(
@@ -198,7 +251,7 @@ class DeviceService(private val addresses: () -> List<String>) {
                 true to "onvif://www.onvif.org/Profile/Streaming",
                 true to "onvif://www.onvif.org/Profile/S",
                 true to "onvif://www.onvif.org/Profile/T",
-                false to "onvif://www.onvif.org/name/${enc(d.name)}",
+                false to "$NAME_SCOPE${enc(d.name)}",
                 true to "onvif://www.onvif.org/hardware/${enc(d.info.model)}",
                 false to "onvif://www.onvif.org/location/",
             )

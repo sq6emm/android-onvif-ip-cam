@@ -1,7 +1,9 @@
 """ONVIF compatibility check using onvif-zeep-async (the library Home Assistant and Frigate use).
 
-Usage: python onvif_check.py HOST PORT USER PASS
+Usage: python onvif_check.py HOST PORT USER PASS [config]
 Exercises the calls HA's onvif integration and Frigate's PTZ code make, and fails loudly on errors.
+With "config" it also changes device configuration over ONVIF (name, video source, rotation, OSD,
+audio, motion rule) and restores the original values afterwards. On the phone each change restarts streaming.
 """
 import asyncio
 import datetime as dt
@@ -24,7 +26,122 @@ async def step(name, coro):
         return None
 
 
-async def main(host, port, user, pw):
+async def wait_ready(media, seconds=20):
+    """After a config change the phone restarts its servers (0.5 s after replying); wait until they answer again."""
+    await asyncio.sleep(2.5)
+    for _ in range(seconds):
+        try:
+            await media.GetProfiles()
+            return
+        except Exception:  # noqa: BLE001
+            await asyncio.sleep(1)
+
+
+def rotation_of(cfg):
+    """Rotation in degrees from a VideoSourceConfiguration, wherever zeep put the Extension."""
+    rot = cfg.Extension.Rotate if cfg.Extension is not None else None
+    if rot is not None:
+        return 0 if rot.Mode == "OFF" else int(rot.Degree or 0)
+    for el in getattr(cfg, "_value_1", None) or []:
+        if hasattr(el, "iter"):
+            mode = next((e.text for e in el.iter() if e.tag.endswith("Mode")), "OFF")
+            deg = next((e.text for e in el.iter() if e.tag.endswith("Degree")), "0")
+            return 0 if mode == "OFF" else int(deg)
+    return 0
+
+
+async def config_checks(cam, dev, media, profiles):
+    print("\n--- configuration over ONVIF ---")
+    scopes = await step("GetScopes", dev.GetScopes()) or []
+    name_scope = next((x.ScopeItem for x in scopes if "/name/" in x.ScopeItem), None)
+    print("      name scope:", name_scope)
+    await step("SetScopes (rename)", dev.SetScopes({"Scopes": ["onvif://www.onvif.org/name/Scope%20Test"]}))
+    await wait_ready(media)
+    s2 = await dev.GetScopes()
+    print("      name scope now:", next((x.ScopeItem for x in s2 if "/name/" in x.ScopeItem), None))
+    await step("SetHostname", dev.SetHostname({"Name": "onvif-test"}))
+    await wait_ready(media)
+    h = await step("GetHostname after set", dev.GetHostname())
+    print("      hostname:", h and h.Name)
+    if h and h.Name != "onvif-test":
+        failures.append("hostname not applied")
+
+    vsc = await step("GetVideoSourceConfigurations", media.GetVideoSourceConfigurations())
+    sources = await step("GetVideoSources", media.GetVideoSources()) or []
+    print("      sources:", [x.token for x in sources])
+    opts = await step("GetVideoSourceConfigurationOptions", media.GetVideoSourceConfigurationOptions({}))
+    if vsc:
+        cfg = vsc[0]
+        old_source, old_rot = cfg.SourceToken, rotation_of(cfg)
+        print("      current:", old_source, "rotation", old_rot)
+
+        def vsc_with(rotation):
+            # zeep parses <tt:Extension> into the preceding xs:any (_value_1), so send a clean structure.
+            rot = {"Mode": "OFF"} if rotation == 0 else {"Mode": "ON", "Degree": rotation}
+            return {"Configuration": {"token": cfg.token, "Name": cfg.Name, "UseCount": cfg.UseCount, "SourceToken": cfg.SourceToken,
+                                      "Bounds": cfg.Bounds, "Extension": {"Rotate": rot}}, "ForcePersistence": True}
+
+        await step("SetVideoSourceConfiguration (rotate 180)", media.SetVideoSourceConfiguration(vsc_with(180)))
+        await wait_ready(media)
+        now = rotation_of((await media.GetVideoSourceConfigurations())[0])
+        print("      rotation now:", now)
+        if now != 180:
+            failures.append("rotation not applied")
+        await step("restore rotation", media.SetVideoSourceConfiguration(vsc_with(old_rot)))
+        await wait_ready(media)
+
+    osds = await step("GetOSDs", media.GetOSDs({}))
+    print("      OSDs:", osds and [o.token for o in osds])
+    await step("GetOSDOptions", media.GetOSDOptions({"ConfigurationToken": "vsc0"}))
+    await step("DeleteOSD", media.DeleteOSD({"OSDToken": "osd_datetime"}))
+    await wait_ready(media)
+    after = await media.GetOSDs({})
+    print("      OSDs after delete:", after and [o.token for o in after])
+    if after:
+        failures.append("OSD not deleted")
+    await step("CreateOSD (restore)", media.CreateOSD({"OSD": {"token": "", "VideoSourceConfigurationToken": "vsc0", "Type": "Text",
+        "Position": {"Type": "UpperLeft"}, "TextString": {"Type": "DateAndTime"}}}))
+    await wait_ready(media)
+
+    token = profiles[0].token
+    await step("RemoveAudioEncoderConfiguration", media.RemoveAudioEncoderConfiguration({"ProfileToken": token}))
+    await wait_ready(media)
+    p = (await media.GetProfiles())[0]
+    print("      audio after remove:", p.AudioEncoderConfiguration)
+    if p.AudioEncoderConfiguration:
+        failures.append("audio not removed")
+    await step("AddAudioEncoderConfiguration (restore)", media.AddAudioEncoderConfiguration({"ProfileToken": token, "ConfigurationToken": "aec0"}))
+    await wait_ready(media)
+
+    engine = await cam.create_analytics_service()
+    await step("Analytics.GetServiceCapabilities", engine.GetServiceCapabilities())
+    # Rule operations live on the RuleEngine binding of the analytics WSDL (same XAddr);
+    # onvif-zeep-async only knows AnalyticsEngineBinding, so register the other one.
+    from onvif.definition import SERVICES
+    SERVICES["ruleengine"] = {"ns": "http://www.onvif.org/ver20/analytics/wsdl", "wsdl": "analytics.wsdl", "binding": "RuleEngineBinding"}
+    analytics = await cam.create_onvif_service("ruleengine")
+    await step("GetSupportedRules", analytics.GetSupportedRules({"ConfigurationToken": "vac0"}))
+    rules = await step("GetRules", analytics.GetRules({"ConfigurationToken": "vac0"})) or []
+    old_sens = None
+    for r in rules:
+        old_sens = next((i.Value for i in r.Parameters.SimpleItem if i.Name == "Sensitivity"), None)
+        print("      rule:", r.Name, r.Type, "Sensitivity", old_sens)
+    await step("ModifyRules (sensitivity 80)", analytics.ModifyRules({"ConfigurationToken": "vac0", "Rule": [{"Name": "MotionDetectorRule",
+        "Type": "tt:CellMotionDetector", "Parameters": {"SimpleItem": [{"Name": "Sensitivity", "Value": "80"}]}}]}))
+    await wait_ready(media)
+    r2 = await analytics.GetRules({"ConfigurationToken": "vac0"})
+    print("      sensitivity now:", r2 and r2[0].Parameters.SimpleItem[0].Value)
+    if old_sens is not None:
+        await step("ModifyRules (restore)", analytics.ModifyRules({"ConfigurationToken": "vac0", "Rule": [{"Name": "MotionDetectorRule",
+            "Type": "tt:CellMotionDetector", "Parameters": {"SimpleItem": [{"Name": "Sensitivity", "Value": old_sens}]}}]}))
+        await wait_ready(media)
+
+    if name_scope:
+        await step("SetScopes (restore name)", dev.SetScopes({"Scopes": [name_scope]}))
+        await wait_ready(media)
+
+
+async def main(host, port, user, pw, with_config=False):
     cam = ONVIFCamera(host, int(port), user, pw)
     await step("update_xaddrs", cam.update_xaddrs())
     print("     xaddrs:", {k.split("/")[-2]: v for k, v in cam.xaddrs.items()})
@@ -107,8 +224,11 @@ async def main(host, port, user, pw):
     s = await step("GetImagingSettings", imaging.GetImagingSettings({"VideoSourceToken": "vs0"}))
     print("     ", s and (s.Brightness, s.Focus and s.Focus.AutoFocusMode, s.IrCutFilter))
     await step("SetImagingSettings", imaging.SetImagingSettings(
-        {"VideoSourceToken": "vs0", "ImagingSettings": {"Brightness": 70, "IrCutFilter": "OFF"}}))
+        {"VideoSourceToken": "vs0", "ImagingSettings": {"Brightness": 70}}))
     await step("GetOptions", imaging.GetOptions({"VideoSourceToken": "vs0"}))
+    if s:  # restore what we changed (IrCutFilter is left alone: OFF switches the phone's torch on)
+        await step("restore imaging", imaging.SetImagingSettings(
+            {"VideoSourceToken": "vs0", "ImagingSettings": {"Brightness": s.Brightness}}))
 
     events = await cam.create_events_service()
     await step("Events.GetServiceCapabilities", events.GetServiceCapabilities())
@@ -134,10 +254,13 @@ async def main(host, port, user, pw):
         await step("Renew", mgr._subscription.Renew(cam.get_next_termination_time(dt.timedelta(seconds=60))))
         await step("Unsubscribe (stop manager)", mgr.shutdown() if hasattr(mgr, "shutdown") else mgr.stop())
 
+    if with_config:
+        await config_checks(cam, dev, media, profiles)
+
     await cam.close()
     print("\nFAILURES:", failures if failures else "none")
     return 1 if failures else 0
 
 
 if __name__ == "__main__":
-    sys.exit(asyncio.run(main(*sys.argv[1:5])))
+    sys.exit(asyncio.run(main(*sys.argv[1:5], with_config=len(sys.argv) > 5 and sys.argv[5] == "config")))

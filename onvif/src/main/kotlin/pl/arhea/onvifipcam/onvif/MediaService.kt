@@ -5,7 +5,6 @@ import pl.arhea.onvifipcam.rtsp.VideoCodec
 
 /** Shared XML fragments for Media v1 and Media2. */
 internal object MediaXml {
-    const val VIDEO_SOURCE = "vs0"
     const val VSC = "vsc0"
     const val AUDIO_SOURCE = "as0"
     const val ASC = "asc0"
@@ -14,11 +13,85 @@ internal object MediaXml {
     val MAIN_RESOLUTIONS = listOf(3840 to 2160, 2560 to 1440, 1920 to 1080, 1280 to 720)
     val SUB_RESOLUTIONS = listOf(1280 to 720, 960 to 540, 854 to 480, 640 to 360)
 
+    const val OSD = "osd_datetime"
+    private const val DEFAULT_AUDIO_KBPS = 64
+    private const val DEFAULT_AUDIO_RATE = 44100
+
     fun videoSourceConfig(d: OnvifDevice, tag: String = "tt:VideoSourceConfiguration"): String {
         val (w, h) = d.sourceSize()
+        val cfg = d.configuration.config()
+        val rotate = if (cfg.rotation == 0) "<tt:Mode>OFF</tt:Mode>" else "<tt:Mode>ON</tt:Mode><tt:Degree>${cfg.rotation}</tt:Degree>"
         return "<$tag token=\"$VSC\"><tt:Name>VideoSourceConfig</tt:Name><tt:UseCount>${d.profiles().size}</tt:UseCount>" +
-            "<tt:SourceToken>$VIDEO_SOURCE</tt:SourceToken><tt:Bounds x=\"0\" y=\"0\" width=\"$w\" height=\"$h\"/></$tag>"
+            "<tt:SourceToken>${esc(cfg.currentSource)}</tt:SourceToken><tt:Bounds x=\"0\" y=\"0\" width=\"$w\" height=\"$h\"/>" +
+            "<tt:Extension><tt:Rotate>$rotate</tt:Rotate></tt:Extension></$tag>"
     }
+
+    /** Audio settings for listing configurations even while audio is disabled. */
+    fun audioOrDefault(d: OnvifDevice) = d.audio() ?: AudioInfo(DEFAULT_AUDIO_RATE, DEFAULT_AUDIO_KBPS)
+
+    fun videoSources(d: OnvifDevice, tag: String): String {
+        val cfg = d.configuration.config()
+        val fps = d.profiles().first().fps
+        val (cw, ch) = d.sourceSize()
+        return cfg.sources.joinToString("") { src ->
+            val (w, h) = if (src.token == cfg.currentSource) cw to ch else src.width to src.height
+            "<$tag token=\"${esc(src.token)}\"><tt:Framerate>$fps</tt:Framerate>" +
+                "<tt:Resolution><tt:Width>$w</tt:Width><tt:Height>$h</tt:Height></tt:Resolution></$tag>"
+        }
+    }
+
+    fun videoSourceOptions(d: OnvifDevice, tag: String): String {
+        val (w, h) = d.sourceSize()
+        return "<$tag><tt:BoundsRange>" +
+            "<tt:XRange><tt:Min>0</tt:Min><tt:Max>0</tt:Max></tt:XRange><tt:YRange><tt:Min>0</tt:Min><tt:Max>0</tt:Max></tt:YRange>" +
+            "<tt:WidthRange><tt:Min>$w</tt:Min><tt:Max>$w</tt:Max></tt:WidthRange><tt:HeightRange><tt:Min>$h</tt:Min><tt:Max>$h</tt:Max></tt:HeightRange>" +
+            "</tt:BoundsRange>" +
+            d.configuration.config().sources.joinToString("") { "<tt:VideoSourceTokensAvailable>${esc(it.token)}</tt:VideoSourceTokensAvailable>" } +
+            "<tt:Extension><tt:Rotate><tt:Mode>OFF</tt:Mode><tt:Mode>ON</tt:Mode>" +
+            "<tt:DegreeList><tt:Items>90</tt:Items><tt:Items>180</tt:Items><tt:Items>270</tt:Items></tt:DegreeList>" +
+            "</tt:Rotate></tt:Extension></$tag>"
+    }
+
+    /** SetVideoSourceConfiguration: SourceToken selects the camera, Extension/Rotate the rotation. */
+    fun applyVideoSourceConfig(d: OnvifDevice, cfg: Xml) {
+        val source = cfg.childText("SourceToken")
+        val rotate = cfg.path("Extension", "Rotate")
+        val rotation = rotate?.let { r ->
+            if (r.childText("Mode").equals("OFF", ignoreCase = true)) 0 else r.childText("Degree")?.toIntOrNull() ?: 0
+        }
+        if (source != null && d.configuration.config().sources.none { it.token == source }) {
+            throw Soap.invalidArg("ter:NoVideoSource", "Unknown video source $source")
+        }
+        if (!d.configuration.change(ConfigChange(source = source, rotation = rotation))) {
+            throw Soap.invalidArg("ter:ConfigModify", "Unsupported video source configuration")
+        }
+    }
+
+    fun osd(d: OnvifDevice, tag: String): String =
+        if (!d.configuration.config().osdEnabled) "" else
+            "<$tag token=\"$OSD\"><tt:VideoSourceConfigurationToken>$VSC</tt:VideoSourceConfigurationToken>" +
+                "<tt:Type>Text</tt:Type><tt:Position><tt:Type>UpperLeft</tt:Type></tt:Position>" +
+                "<tt:TextString><tt:Type>DateAndTime</tt:Type><tt:DateFormat>yyyy-MM-dd</tt:DateFormat>" +
+                "<tt:TimeFormat>HH:mm:ss</tt:TimeFormat></tt:TextString></$tag>"
+
+    fun osdOptions(tag: String) =
+        "<$tag><tt:MaximumNumberOfOSDs Total=\"1\" Image=\"0\" PlainText=\"0\" Date=\"0\" Time=\"0\" DateAndTime=\"1\"/>" +
+            "<tt:Type>Text</tt:Type><tt:PositionOption>UpperLeft</tt:PositionOption>" +
+            "<tt:TextOption><tt:Type>DateAndTime</tt:Type><tt:DateFormat>yyyy-MM-dd</tt:DateFormat>" +
+            "<tt:TimeFormat>HH:mm:ss</tt:TimeFormat></tt:TextOption></$tag>"
+
+    fun setOsd(d: OnvifDevice, enabled: Boolean) {
+        if (!d.configuration.change(ConfigChange(osdEnabled = enabled))) throw Soap.invalidArg("ter:InvalidArgVal", "OSD change rejected")
+    }
+
+    fun setAudio(d: OnvifDevice, enabled: Boolean) {
+        if (!d.configuration.change(ConfigChange(audioEnabled = enabled))) throw Soap.invalidArg("ter:InvalidArgVal", "Audio change rejected")
+    }
+
+    /** The motion detector exposed as a video analytics configuration with one cell-motion rule. */
+    fun analyticsConfig(d: OnvifDevice, tag: String = "tt:VideoAnalyticsConfiguration"): String =
+        "<$tag token=\"${AnalyticsService.CONFIG}\"><tt:Name>MotionDetection</tt:Name><tt:UseCount>${d.profiles().size}</tt:UseCount>" +
+            "<tt:AnalyticsEngineConfiguration/><tt:RuleEngineConfiguration>${AnalyticsService.rules(d, "tt:Rule")}</tt:RuleEngineConfiguration></$tag>"
 
     fun audioSourceConfig(d: OnvifDevice, tag: String = "tt:AudioSourceConfiguration") =
         "<$tag token=\"$ASC\"><tt:Name>AudioSourceConfig</tt:Name><tt:UseCount>${d.profiles().size}</tt:UseCount>" +
@@ -114,24 +187,17 @@ class MediaService {
                     "<tt:InvalidAfterConnect>false</tt:InvalidAfterConnect><tt:InvalidAfterReboot>false</tt:InvalidAfterReboot>" +
                     "<tt:Timeout>PT0S</tt:Timeout></trt:MediaUri></trt:GetSnapshotUriResponse>"
             }
-            "GetVideoSources" -> {
-                val (w, h) = d.sourceSize()
-                val fps = d.profiles().first().fps
-                "<trt:GetVideoSourcesResponse><trt:VideoSources token=\"${MediaXml.VIDEO_SOURCE}\"><tt:Framerate>$fps</tt:Framerate>" +
-                    "<tt:Resolution><tt:Width>$w</tt:Width><tt:Height>$h</tt:Height></tt:Resolution></trt:VideoSources></trt:GetVideoSourcesResponse>"
+            "GetVideoSources" -> "<trt:GetVideoSourcesResponse>${MediaXml.videoSources(d, "trt:VideoSources")}</trt:GetVideoSourcesResponse>"
+            "SetVideoSourceConfiguration" -> {
+                MediaXml.applyVideoSourceConfig(d, op.child("Configuration") ?: throw Soap.invalidArg("ter:ConfigModify", "missing Configuration"))
+                "<trt:SetVideoSourceConfigurationResponse/>"
             }
             "GetVideoSourceConfigurations", "GetCompatibleVideoSourceConfigurations" ->
                 "<trt:${c.soap.opName}Response>${MediaXml.videoSourceConfig(d, "trt:Configurations")}</trt:${c.soap.opName}Response>"
             "GetVideoSourceConfiguration" ->
                 "<trt:GetVideoSourceConfigurationResponse>${MediaXml.videoSourceConfig(d, "trt:Configuration")}</trt:GetVideoSourceConfigurationResponse>"
-            "GetVideoSourceConfigurationOptions" -> {
-                val (w, h) = d.sourceSize()
-                "<trt:GetVideoSourceConfigurationOptionsResponse><trt:Options><tt:BoundsRange>" +
-                    "<tt:XRange><tt:Min>0</tt:Min><tt:Max>0</tt:Max></tt:XRange><tt:YRange><tt:Min>0</tt:Min><tt:Max>0</tt:Max></tt:YRange>" +
-                    "<tt:WidthRange><tt:Min>$w</tt:Min><tt:Max>$w</tt:Max></tt:WidthRange><tt:HeightRange><tt:Min>$h</tt:Min><tt:Max>$h</tt:Max></tt:HeightRange>" +
-                    "</tt:BoundsRange><tt:VideoSourceTokensAvailable>${MediaXml.VIDEO_SOURCE}</tt:VideoSourceTokensAvailable>" +
-                    "</trt:Options></trt:GetVideoSourceConfigurationOptionsResponse>"
-            }
+            "GetVideoSourceConfigurationOptions" ->
+                "<trt:GetVideoSourceConfigurationOptionsResponse>${MediaXml.videoSourceOptions(d, "trt:Options")}</trt:GetVideoSourceConfigurationOptionsResponse>"
             "GetVideoEncoderConfigurations" -> "<trt:GetVideoEncoderConfigurationsResponse>" +
                 d.profiles().joinToString("") { MediaXml.videoEncoderConfig(it, "trt:Configurations") } +
                 "</trt:GetVideoEncoderConfigurationsResponse>"
@@ -153,31 +219,59 @@ class MediaService {
                 }
                 "<trt:SetVideoEncoderConfigurationResponse/>"
             }
-            "GetAudioSources" -> if (d.audio() != null) {
+            "GetAudioSources" ->
                 "<trt:GetAudioSourcesResponse><trt:AudioSources token=\"${MediaXml.AUDIO_SOURCE}\"><tt:Channels>1</tt:Channels></trt:AudioSources></trt:GetAudioSourcesResponse>"
-            } else "<trt:GetAudioSourcesResponse/>"
             "GetAudioSourceConfigurations", "GetCompatibleAudioSourceConfigurations" -> "<trt:${c.soap.opName}Response>" +
-                (if (d.audio() != null) MediaXml.audioSourceConfig(d, "trt:Configurations") else "") + "</trt:${c.soap.opName}Response>"
+                MediaXml.audioSourceConfig(d, "trt:Configurations") + "</trt:${c.soap.opName}Response>"
             "GetAudioSourceConfiguration" ->
                 "<trt:GetAudioSourceConfigurationResponse>${MediaXml.audioSourceConfig(d, "trt:Configuration")}</trt:GetAudioSourceConfigurationResponse>"
             "GetAudioEncoderConfigurations", "GetCompatibleAudioEncoderConfigurations" -> "<trt:${c.soap.opName}Response>" +
-                (d.audio()?.let { MediaXml.audioEncoderConfig(it, "trt:Configurations") } ?: "") + "</trt:${c.soap.opName}Response>"
-            "GetAudioEncoderConfiguration" -> {
-                val a = d.audio() ?: throw Soap.invalidArg("ter:NoConfig", "Audio disabled")
-                "<trt:GetAudioEncoderConfigurationResponse>${MediaXml.audioEncoderConfig(a, "trt:Configuration")}</trt:GetAudioEncoderConfigurationResponse>"
+                MediaXml.audioEncoderConfig(MediaXml.audioOrDefault(d), "trt:Configurations") + "</trt:${c.soap.opName}Response>"
+            "GetAudioEncoderConfiguration" ->
+                "<trt:GetAudioEncoderConfigurationResponse>${MediaXml.audioEncoderConfig(MediaXml.audioOrDefault(d), "trt:Configuration")}" +
+                    "</trt:GetAudioEncoderConfigurationResponse>"
+            "AddAudioSourceConfiguration", "AddAudioEncoderConfiguration" -> {
+                MediaXml.setAudio(d, true)
+                "<trt:${c.soap.opName}Response/>"
             }
+            "RemoveAudioSourceConfiguration", "RemoveAudioEncoderConfiguration" -> {
+                MediaXml.setAudio(d, false)
+                "<trt:${c.soap.opName}Response/>"
+            }
+            "GetOSDs" -> "<trt:GetOSDsResponse>${MediaXml.osd(d, "trt:OSDs")}</trt:GetOSDsResponse>"
+            "GetOSD" -> {
+                val x = MediaXml.osd(d, "trt:OSD")
+                if (x.isEmpty() || op.childText("OSDToken") != MediaXml.OSD) throw Soap.invalidArg("ter:NoConfig", "OSD does not exist")
+                "<trt:GetOSDResponse>$x</trt:GetOSDResponse>"
+            }
+            "GetOSDOptions" -> "<trt:GetOSDOptionsResponse>${MediaXml.osdOptions("trt:OSDOptions")}</trt:GetOSDOptionsResponse>"
+            "CreateOSD" -> {
+                MediaXml.setOsd(d, true)
+                "<trt:CreateOSDResponse><trt:OSDToken>${MediaXml.OSD}</trt:OSDToken></trt:CreateOSDResponse>"
+            }
+            "SetOSD" -> {
+                MediaXml.setOsd(d, true)
+                "<trt:SetOSDResponse/>"
+            }
+            "DeleteOSD" -> {
+                MediaXml.setOsd(d, false)
+                "<trt:DeleteOSDResponse/>"
+            }
+            "GetVideoAnalyticsConfigurations", "GetCompatibleVideoAnalyticsConfigurations" ->
+                "<trt:${c.soap.opName}Response>${MediaXml.analyticsConfig(d, "trt:Configurations")}</trt:${c.soap.opName}Response>"
+            "GetVideoAnalyticsConfiguration" ->
+                "<trt:GetVideoAnalyticsConfigurationResponse>${MediaXml.analyticsConfig(d, "trt:Configuration")}</trt:GetVideoAnalyticsConfigurationResponse>"
             "GetAudioEncoderConfigurationOptions" -> "<trt:GetAudioEncoderConfigurationOptionsResponse><trt:Options>" +
                 "<tt:Options><tt:Encoding>AAC</tt:Encoding><tt:BitrateList><tt:Items>64</tt:Items></tt:BitrateList>" +
                 "<tt:SampleRateList><tt:Items>44</tt:Items></tt:SampleRateList></tt:Options>" +
                 "</trt:Options></trt:GetAudioEncoderConfigurationOptionsResponse>"
             "GetAudioOutputs" -> "<trt:GetAudioOutputsResponse/>"
             "GetMetadataConfigurations", "GetCompatibleMetadataConfigurations",
-            "GetVideoAnalyticsConfigurations", "GetCompatibleVideoAnalyticsConfigurations",
-            "GetAudioOutputConfigurations", "GetAudioDecoderConfigurations", "GetOSDs" ->
+            "GetAudioOutputConfigurations", "GetAudioDecoderConfigurations" ->
                 "<trt:${c.soap.opName}Response/>"
             "SetSynchronizationPoint" -> "<trt:SetSynchronizationPointResponse/>"
-            "AddVideoEncoderConfiguration", "AddVideoSourceConfiguration", "AddAudioEncoderConfiguration",
-            "AddAudioSourceConfiguration", "AddPTZConfiguration", "RemovePTZConfiguration", "SetVideoSourceConfiguration" ->
+            "AddVideoEncoderConfiguration", "AddVideoSourceConfiguration", "AddVideoAnalyticsConfiguration",
+            "AddPTZConfiguration", "RemovePTZConfiguration" ->
                 "<trt:${c.soap.opName}Response/>"
             else -> null
         }
@@ -190,6 +284,7 @@ class MediaService {
             (if (a != null) MediaXml.audioSourceConfig(d) else "") +
             MediaXml.videoEncoderConfig(p) +
             (if (a != null) MediaXml.audioEncoderConfig(a) else "") +
+            MediaXml.analyticsConfig(d) +
             (if (d.ptz != null) PtzService.configuration("tt:PTZConfiguration") else "") +
             "</$tag>"
     }
@@ -216,7 +311,7 @@ class MediaService {
 
     companion object {
         fun capabilities(d: OnvifDevice) =
-            "<trt:Capabilities SnapshotUri=\"true\" Rotation=\"false\" VideoSourceMode=\"false\" OSD=\"false\">" +
+            "<trt:Capabilities SnapshotUri=\"true\" Rotation=\"true\" VideoSourceMode=\"false\" OSD=\"true\">" +
                 "<trt:ProfileCapabilities MaximumNumberOfProfiles=\"${d.profiles().size}\"/>" +
                 "<trt:StreamingCapabilities RTPMulticast=\"false\" RTP_TCP=\"true\" RTP_RTSP_TCP=\"true\" " +
                 "NonAggregateControl=\"false\" NoRTSPStreaming=\"false\"/></trt:Capabilities>"
@@ -249,6 +344,20 @@ class Media2Service {
             }
             "GetVideoSourceConfigurations" ->
                 "<tr2:GetVideoSourceConfigurationsResponse>${MediaXml.videoSourceConfig(d, "tr2:Configurations")}</tr2:GetVideoSourceConfigurationsResponse>"
+            "GetVideoSourceConfigurationOptions" ->
+                "<tr2:GetVideoSourceConfigurationOptionsResponse>${MediaXml.videoSourceOptions(d, "tr2:Options")}</tr2:GetVideoSourceConfigurationOptionsResponse>"
+            "SetVideoSourceConfiguration" -> {
+                MediaXml.applyVideoSourceConfig(d, op.child("Configuration") ?: throw Soap.invalidArg("ter:ConfigModify", "missing Configuration"))
+                "<tr2:SetVideoSourceConfigurationResponse/>"
+            }
+            "GetOSDs" -> "<tr2:GetOSDsResponse>${MediaXml.osd(d, "tr2:OSDs")}</tr2:GetOSDsResponse>"
+            "GetOSDOptions" -> "<tr2:GetOSDOptionsResponse>${MediaXml.osdOptions("tr2:OSDOptions")}</tr2:GetOSDOptionsResponse>"
+            "CreateOSD" -> {
+                MediaXml.setOsd(d, true)
+                "<tr2:CreateOSDResponse><tr2:OSDToken>${MediaXml.OSD}</tr2:OSDToken></tr2:CreateOSDResponse>"
+            }
+            "SetOSD" -> { MediaXml.setOsd(d, true); "<tr2:SetOSDResponse/>" }
+            "DeleteOSD" -> { MediaXml.setOsd(d, false); "<tr2:DeleteOSDResponse/>" }
             "GetVideoEncoderConfigurations" -> {
                 val token = op.childText("ConfigurationToken")
                 "<tr2:GetVideoEncoderConfigurationsResponse>" +
@@ -257,10 +366,9 @@ class Media2Service {
                     "</tr2:GetVideoEncoderConfigurationsResponse>"
             }
             "GetAudioSourceConfigurations" -> "<tr2:GetAudioSourceConfigurationsResponse>" +
-                (if (d.audio() != null) MediaXml.audioSourceConfig(d, "tr2:Configurations") else "") +
-                "</tr2:GetAudioSourceConfigurationsResponse>"
+                MediaXml.audioSourceConfig(d, "tr2:Configurations") + "</tr2:GetAudioSourceConfigurationsResponse>"
             "GetAudioEncoderConfigurations" -> "<tr2:GetAudioEncoderConfigurationsResponse>" +
-                (d.audio()?.let { MediaXml.audioEncoder2Config(it) } ?: "") + "</tr2:GetAudioEncoderConfigurationsResponse>"
+                MediaXml.audioEncoder2Config(MediaXml.audioOrDefault(d)) + "</tr2:GetAudioEncoderConfigurationsResponse>"
             "GetVideoEncoderConfigurationOptions" -> {
                 val token = op.childText("ConfigurationToken")
                 val p = d.profiles().firstOrNull { it.encoderToken == token } ?: d.profiles().first()
@@ -284,10 +392,19 @@ class Media2Service {
                 }
                 "<tr2:SetVideoEncoderConfigurationResponse/>"
             }
-            "GetMetadataConfigurations", "GetAnalyticsConfigurations", "GetAudioOutputConfigurations",
-            "GetAudioDecoderConfigurations", "GetOSDs", "GetMasks" -> "<tr2:${c.soap.opName}Response/>"
+            "GetAnalyticsConfigurations" ->
+                "<tr2:GetAnalyticsConfigurationsResponse>${MediaXml.analyticsConfig(d, "tr2:Configurations")}</tr2:GetAnalyticsConfigurationsResponse>"
+            "GetMetadataConfigurations", "GetAudioOutputConfigurations",
+            "GetAudioDecoderConfigurations", "GetMasks" -> "<tr2:${c.soap.opName}Response/>"
             "SetSynchronizationPoint" -> "<tr2:SetSynchronizationPointResponse/>"
-            "AddConfiguration", "RemoveConfiguration" -> "<tr2:${c.soap.opName}Response/>"
+            "AddConfiguration", "RemoveConfiguration" -> {
+                // Adding/removing the audio configurations switches audio on/off; other types are fixed.
+                val types = op.children("Configuration").mapNotNull { it.childText("Type") }
+                if (types.any { it == "AudioSource" || it == "AudioEncoder" || it == "All" }) {
+                    MediaXml.setAudio(d, c.soap.opName == "AddConfiguration")
+                }
+                "<tr2:${c.soap.opName}Response/>"
+            }
             else -> null
         }
     }
@@ -301,6 +418,7 @@ class Media2Service {
             if (want("AudioSource") && a != null) append(MediaXml.audioSourceConfig(d, "tr2:AudioSource"))
             if (want("VideoEncoder")) append(MediaXml.videoEncoder2Config(p, "tr2:VideoEncoder"))
             if (want("AudioEncoder") && a != null) append(MediaXml.audioEncoder2Config(a, "tr2:AudioEncoder"))
+            if (want("Analytics")) append(MediaXml.analyticsConfig(d, "tr2:Analytics"))
             if (want("PTZ") && d.ptz != null) append(PtzService.configuration("tr2:PTZ"))
             append("</tr2:Configurations>")
         }
@@ -309,7 +427,7 @@ class Media2Service {
 
     companion object {
         fun capabilities(d: OnvifDevice) =
-            "<tr2:Capabilities SnapshotUri=\"true\" Rotation=\"false\" VideoSourceMode=\"false\" OSD=\"false\" " +
+            "<tr2:Capabilities SnapshotUri=\"true\" Rotation=\"true\" VideoSourceMode=\"false\" OSD=\"true\" " +
                 "TemporaryOSDText=\"false\" Mask=\"false\" SourceMask=\"false\">" +
                 "<tr2:ProfileCapabilities MaximumNumberOfProfiles=\"${d.profiles().size}\" " +
                 "ConfigurationsSupported=\"VideoSource VideoEncoder AudioSource AudioEncoder PTZ\"/>" +

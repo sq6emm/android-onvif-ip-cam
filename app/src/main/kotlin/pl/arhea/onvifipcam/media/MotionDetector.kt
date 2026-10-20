@@ -16,6 +16,8 @@ class MotionDetector(
     private val rows = 9
     private val background = FloatArray(width * height)
     private var initialized = false
+    /** Frames left during which the background adapts fast and nothing is reported (AE/AWB settling). */
+    private var warmup = 0
     private var lastMotionMs = 0L
     @Volatile var active = false
         private set
@@ -38,6 +40,15 @@ class MotionDetector(
         if (!initialized) {
             for (i in background.indices) background[i] = (luma[i].toInt() and 0xff).toFloat()
             initialized = true
+            warmup = WARMUP_FRAMES
+            return
+        }
+        if (warmup > 0) {
+            warmup--
+            for (i in background.indices) {
+                val v = (luma[i].toInt() and 0xff).toFloat()
+                background[i] += (v - background[i]) * 0.3f
+            }
             return
         }
         val cw = width / cols
@@ -65,5 +76,10 @@ class MotionDetector(
             active = newActive
             onChange(newActive)
         }
+    }
+
+    companion object {
+        /** ~3 s at the renderer's 5 Hz motion sampling. */
+        private const val WARMUP_FRAMES = 15
     }
 }

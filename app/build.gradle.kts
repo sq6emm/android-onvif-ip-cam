@@ -16,6 +16,16 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        // Fixed key committed to the repo so every build (any machine/container) can update the installed app.
+        getByName("debug") {
+            storeFile = rootProject.file("keystore/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false

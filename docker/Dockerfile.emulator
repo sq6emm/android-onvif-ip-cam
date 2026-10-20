@@ -1,0 +1,9 @@
+# Headless Android emulator (KVM) for end-to-end tests of the app. Run with --device /dev/kvm.
+FROM onvifipcam-android:1
+RUN yes | sdkmanager --licenses >/dev/null && sdkmanager "emulator" "system-images;android-34;google_apis;x86_64" >/dev/null \
+ && chmod -R a+rwX $ANDROID_HOME
+ENV PATH=$PATH:$ANDROID_HOME/emulator
+RUN apt-get update && apt-get install -y --no-install-recommends libpulse0 libgl1 libnss3 libxcomposite1 libxcursor1 libxi6 libxtst6 libasound2 libxdamage1 libxrandr2 libxkbfile1 libbsd0 && rm -rf /var/lib/apt/lists/*
+RUN echo no | avdmanager create avd -n test -k "system-images;android-34;google_apis;x86_64" -d pixel_5 \
+ && printf 'hw.camera.back=emulated\nhw.camera.front=none\nhw.ramSize=3072\nhw.gpu.enabled=yes\nhw.gpu.mode=swiftshader_indirect\nhw.audioInput=yes\n' >> /root/.android/avd/test.avd/config.ini
+CMD ["sh", "-c", "emulator -avd test -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -camera-back emulated -accel on -qemu -m 3072"]

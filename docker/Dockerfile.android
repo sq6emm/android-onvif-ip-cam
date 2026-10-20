@@ -1,0 +1,11 @@
+FROM eclipse-temurin:17-jdk-jammy
+ENV ANDROID_HOME=/opt/android-sdk ANDROID_SDK_ROOT=/opt/android-sdk
+RUN apt-get update && apt-get install -y --no-install-recommends unzip wget git && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p $ANDROID_HOME/cmdline-tools && cd /tmp \
+ && wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O ct.zip \
+ && unzip -q ct.zip -d $ANDROID_HOME/cmdline-tools && mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest && rm ct.zip
+ENV PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
+RUN yes | sdkmanager --licenses >/dev/null && sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools" >/dev/null \
+ && chmod -R a+rwX $ANDROID_HOME
+ENV GRADLE_USER_HOME=/cache/gradle
+WORKDIR /work

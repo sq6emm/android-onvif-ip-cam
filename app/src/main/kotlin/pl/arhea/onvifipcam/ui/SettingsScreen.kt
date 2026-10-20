@@ -66,8 +66,10 @@ fun SettingsScreen(onBack: () -> Unit) {
             rtspPort = rtspPort.toIntOrNull()?.takeIf { it in 1024..65535 } ?: s.rtspPort,
             onvifPort = onvifPort.toIntOrNull()?.takeIf { it in 1024..65535 } ?: s.onvifPort,
         )
-        SettingsStore.update { next }
-        if (CameraService.isRunning) CameraService.restart(context)
+        if (next != SettingsStore.current) {
+            SettingsStore.update { next }
+            if (CameraService.isRunning) CameraService.restart(context)
+        }
         onBack()
     }
 
@@ -80,10 +82,11 @@ fun SettingsScreen(onBack: () -> Unit) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            // No save button up here: it would sit where "Ustawienia" is on the main screen and catch double taps.
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onBack) { Text("← Wróć") }
+                TextButton(onClick = onBack) { Text("← Wróć bez zapisywania") }
                 Spacer(Modifier.weight(1f))
-                Button(onClick = ::save) { Text("Zapisz") }
+                Text("Ustawienia", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             }
 
             Section("Kamera")

@@ -70,6 +70,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         if (intent.getBooleanExtra(EXTRA_AUTOSTART, false)) autostart()
     }
 
@@ -79,10 +80,27 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun autostart() {
+        // Handle the boot request once; a recreated activity must not start/hide itself again.
+        intent?.removeExtra(EXTRA_AUTOSTART)
         if (hasPermission(Manifest.permission.CAMERA)) {
+            // Be visible over the lock screen so the camera service counts as started from the foreground.
+            showOverLockScreen(true)
             CameraService.start(this)
             // The service keeps camera access once started from the foreground; get out of the way.
-            Handler(Looper.getMainLooper()).postDelayed({ moveTaskToBack(true) }, 2000)
+            Handler(Looper.getMainLooper()).postDelayed({
+                showOverLockScreen(false)
+                moveTaskToBack(true)
+            }, 3000)
+        }
+    }
+
+    private fun showOverLockScreen(on: Boolean) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(on)
+        } else {
+            @Suppress("DEPRECATION")
+            if (on) window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
+            else window.clearFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
         }
     }
 

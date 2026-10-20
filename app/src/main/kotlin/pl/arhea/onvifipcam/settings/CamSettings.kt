@@ -69,7 +69,13 @@ object SettingsStore {
     val current: CamSettings get() = _settings.value
 
     fun init(context: Context) {
-        prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        // Device-protected storage is readable before the first unlock after boot (Direct Boot),
+        // so the camera can autostart while the phone still waits for the PIN.
+        val storage = context.createDeviceProtectedStorageContext()
+        if (!storage.getSharedPreferences(PREFS, Context.MODE_PRIVATE).contains(K_UUID)) {
+            runCatching { storage.moveSharedPreferencesFrom(context, PREFS) }
+        }
+        prefs = storage.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         if (!prefs.contains(K_UUID)) {
             prefs.edit()
                 .putString(K_UUID, UUID.randomUUID().toString())
@@ -159,6 +165,7 @@ object SettingsStore {
         8554, 8080, "Android IP Cam", true, true, 50, false, "",
     )
 
+    private const val PREFS = "settings"
     private const val K_CAMERA = "camera"
     private const val K_MAIN_RES = "main_res"
     private const val K_MAIN_FPS = "main_fps"

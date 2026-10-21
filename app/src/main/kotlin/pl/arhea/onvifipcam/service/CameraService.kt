@@ -104,6 +104,11 @@ class CameraService : Service() {
                 return START_NOT_STICKY
             }
             else -> {
+                // A sticky restart after the camera permission was revoked: the main screen asks for it again.
+                if (!hasPermission(Manifest.permission.CAMERA)) {
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
                 if (!enterForeground()) return START_NOT_STICKY
                 val restart = intent?.action == ACTION_RESTART
                 if (restart) logger.log("Restart requested: settings changed in the app")

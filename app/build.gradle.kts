@@ -12,8 +12,10 @@ android {
         applicationId = "pl.arhea.onvifipcam"
         minSdk = 26
         targetSdk = 35
-        // CI passes these for tagged releases; local builds keep the defaults.
-        versionCode = (findProperty("versionCode") as String?)?.toInt() ?: 1
+        // Minutes since 2024-01-01: every newer build (local or CI) installs over an older one.
+        versionCode = (findProperty("versionCode") as String?)?.toInt()
+            ?: ((System.currentTimeMillis() / 60_000) - 28_401_120).toInt()
+        // CI sets this from the tag for releases.
         versionName = (findProperty("versionName") as String?) ?: "0.1.0"
     }
 

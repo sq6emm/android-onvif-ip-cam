@@ -25,6 +25,7 @@ import pl.arhea.onvifipcam.OnvifCamApp
 import pl.arhea.onvifipcam.R
 import pl.arhea.onvifipcam.media.CameraPipeline
 import pl.arhea.onvifipcam.media.CameraSource
+import pl.arhea.onvifipcam.media.DeviceOrientation
 import pl.arhea.onvifipcam.onvif.EventHub
 import pl.arhea.onvifipcam.onvif.OnvifServer
 import pl.arhea.onvifipcam.onvif.PresetStore
@@ -58,6 +59,9 @@ data class ServiceStatus(
     val motionLevel: Float = 0f,
     val thermal: String = "",
     val info: String = "",
+    /** Main stream size as encoded (portrait when the image is rotated to portrait); 0 when stopped. */
+    val mainWidth: Int = 0,
+    val mainHeight: Int = 0,
     val log: List<String> = emptyList(),
 )
 
@@ -68,6 +72,7 @@ data class ServiceStatus(
 class CameraService : Service() {
     private val worker = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "cam-service") }
     @Volatile private var pipeline: CameraPipeline? = null
+    private var orientation: DeviceOrientation? = null
     private var rtsp: RtspServer? = null
     private var onvif: OnvifServer? = null
     private var discovery: WsDiscovery? = null
@@ -91,6 +96,7 @@ class CameraService : Service() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        orientation = DeviceOrientation(this) { o -> if (!worker.isShutdown) worker.execute { onPhoneTurned(o) } }.also { it.start() }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -124,6 +130,7 @@ class CameraService : Service() {
     }
 
     override fun onDestroy() {
+        orientation?.stop()
         worker.execute { stopStreaming() }
         worker.shutdown()
         worker.awaitTermination(5, TimeUnit.SECONDS)
@@ -168,6 +175,7 @@ class CameraService : Service() {
         _status.update {
             ServiceStatus(starting = true, rtspPort = s.rtspPort, onvifPort = s.onvifPort, log = it.log)
         }
+        val cam = cameras.first { it.id == s.cameraId }
         if (!hasPermission(Manifest.permission.CAMERA)) {
             _status.update { it.copy(starting = false, error = "Brak uprawnienia do kamery") }
             return
@@ -179,8 +187,9 @@ class CameraService : Service() {
         }
         try {
             val audioAllowed = hasPermission(Manifest.permission.RECORD_AUDIO)
+            val rotation = imageRotation(s, cam.facing)
             val p = CameraPipeline(
-                this, s, mainEndpoint, subEndpoint, audioAllowed,
+                this, s, rotation, cam.sensorOrientation, mainEndpoint, subEndpoint, audioAllowed,
                 onMotion = { active ->
                     logger.log("Motion ${if (active) "started" else "ended"}")
                     onvif?.publishMotion(active)
@@ -190,7 +199,11 @@ class CameraService : Service() {
             p.start()
             preview?.let { (surface, w, h) -> p.setPreview(surface, w, h) }
             pipeline = p
-            logger.log("Camera ${s.cameraId}: capture ${p.captureSize}, main ${p.mainSize} ${p.mainCodec}, sub ${p.subSize}")
+            logger.log(
+                "Camera ${s.cameraId}: capture ${p.captureSize}, rotation $rotation°" +
+                    (if (s.rotation == CamSettings.ROTATION_AUTO) " (auto, phone at ${orientation?.current}°)" else "") +
+                    ", main ${p.mainSize} ${p.mainCodec}, sub ${p.subSize}",
+            )
             if (s.main.codec != p.mainCodec) logger.log("H.265 encoder not available, using H.264")
             p.audioError?.let { logger.log("Audio disabled: $it") }
 
@@ -230,6 +243,26 @@ class CameraService : Service() {
             stopStreaming()
             _status.update { it.copy(running = false, starting = false, error = msg) }
         }
+    }
+
+    /** Clockwise image rotation for the current settings: fixed, or following how the phone is turned. */
+    private fun imageRotation(s: CamSettings, facing: String): Int {
+        if (s.rotation != CamSettings.ROTATION_AUTO) return s.rotation
+        val o = orientation ?: return 0
+        o.awaitFirstReading()
+        return DeviceOrientation.uprightRotation(o.current, facing)
+    }
+
+    /** Auto rotation: restart the pipeline when the phone has been turned to a new position. */
+    private fun onPhoneTurned(o: Int) {
+        val p = pipeline ?: return
+        val s = SettingsStore.current
+        if (s.rotation != CamSettings.ROTATION_AUTO) return
+        val facing = runCatching { CameraSource.list(this) }.getOrDefault(emptyList()).firstOrNull { it.id == s.cameraId }?.facing ?: "back"
+        val r = DeviceOrientation.uprightRotation(o, facing)
+        if (r == p.rotation) return
+        logger.log("Phone turned to $o°, rotating image to $r°")
+        restartFromWorker()
     }
 
     private fun restartFromWorker() {
@@ -272,6 +305,8 @@ class CameraService : Service() {
                 fps = fps,
                 motion = p.motionActive,
                 motionLevel = p.motionLevel,
+                mainWidth = p.mainSize.width,
+                mainHeight = p.mainSize.height,
                 info = "${p.mainSize.width}x${p.mainSize.height} ${p.mainCodec} / ${p.subSize.width}x${p.subSize.height} H264, " +
                     "capture ${p.captureSize}",
             )

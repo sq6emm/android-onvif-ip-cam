@@ -38,15 +38,15 @@ async def wait_ready(media, seconds=20):
 
 
 def rotation_of(cfg):
-    """Rotation in degrees from a VideoSourceConfiguration, wherever zeep put the Extension."""
+    """Rotation in degrees (or "AUTO") from a VideoSourceConfiguration, wherever zeep put the Extension."""
     rot = cfg.Extension.Rotate if cfg.Extension is not None else None
     if rot is not None:
-        return 0 if rot.Mode == "OFF" else int(rot.Degree or 0)
+        return 0 if rot.Mode == "OFF" else "AUTO" if rot.Mode == "AUTO" else int(rot.Degree or 0)
     for el in getattr(cfg, "_value_1", None) or []:
         if hasattr(el, "iter"):
             mode = next((e.text for e in el.iter() if e.tag.endswith("Mode")), "OFF")
             deg = next((e.text for e in el.iter() if e.tag.endswith("Degree")), "0")
-            return 0 if mode == "OFF" else int(deg)
+            return 0 if mode == "OFF" else "AUTO" if mode == "AUTO" else int(deg)
     return 0
 
 
@@ -77,7 +77,7 @@ async def config_checks(cam, dev, media, profiles):
 
         def vsc_with(rotation):
             # zeep parses <tt:Extension> into the preceding xs:any (_value_1), so send a clean structure.
-            rot = {"Mode": "OFF"} if rotation == 0 else {"Mode": "ON", "Degree": rotation}
+            rot = {"Mode": "OFF"} if rotation == 0 else {"Mode": "AUTO"} if rotation == "AUTO" else {"Mode": "ON", "Degree": rotation}
             return {"Configuration": {"token": cfg.token, "Name": cfg.Name, "UseCount": cfg.UseCount, "SourceToken": cfg.SourceToken,
                                       "Bounds": cfg.Bounds, "Extension": {"Rotate": rot}}, "ForcePersistence": True}
 
@@ -87,6 +87,12 @@ async def config_checks(cam, dev, media, profiles):
         print("      rotation now:", now)
         if now != 180:
             failures.append("rotation not applied")
+        await step("SetVideoSourceConfiguration (rotate AUTO)", media.SetVideoSourceConfiguration(vsc_with("AUTO")))
+        await wait_ready(media)
+        now = rotation_of((await media.GetVideoSourceConfigurations())[0])
+        print("      rotation now:", now)
+        if now != "AUTO":
+            failures.append("auto rotation not applied")
         await step("restore rotation", media.SetVideoSourceConfiguration(vsc_with(old_rot)))
         await wait_ready(media)
 

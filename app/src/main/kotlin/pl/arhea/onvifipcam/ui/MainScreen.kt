@@ -87,9 +87,8 @@ fun MainScreen(
                 TextButton(onClick = onSettings) { Text("Ustawienia") }
             }
 
-            val rotated = settings.rotation == 90 || settings.rotation == 270
             val r = settings.main.resolution
-            val aspect = if (rotated) r.height.toFloat() / r.width else r.width.toFloat() / r.height
+            val aspect = if (status.mainWidth > 0) status.mainWidth.toFloat() / status.mainHeight else r.width.toFloat() / r.height
             Box(
                 Modifier
                     .fillMaxWidth()

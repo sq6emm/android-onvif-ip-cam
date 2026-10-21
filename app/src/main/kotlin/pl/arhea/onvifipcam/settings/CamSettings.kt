@@ -56,7 +56,9 @@ data class CamSettings(
         val MAIN_RESOLUTIONS = listOf(Resolution(3840, 2160), Resolution(2560, 1440), Resolution(1920, 1080), Resolution(1280, 720))
         val SUB_RESOLUTIONS = listOf(Resolution(1280, 720), Resolution(960, 540), Resolution(854, 480), Resolution(640, 360))
         val FPS_OPTIONS = listOf(5, 10, 15, 20, 25, 30)
-        val ROTATIONS = listOf(0, 90, 180, 270)
+        /** Follow how the phone is turned (accelerometer). */
+        const val ROTATION_AUTO = -1
+        val ROTATIONS = listOf(ROTATION_AUTO, 0, 90, 180, 270)
         val CAPTURE_SCALES = listOf(1.0f, 1.5f, 2.0f)
     }
 }
@@ -107,7 +109,7 @@ object SettingsStore {
         ),
         keyframeIntervalS = prefs.getInt(K_GOP, 2),
         captureScale = prefs.getFloat(K_CAPTURE_SCALE, 1.5f),
-        rotation = prefs.getInt(K_ROTATION, 0),
+        rotation = prefs.getInt(K_ROTATION, CamSettings.ROTATION_AUTO),
         audioEnabled = prefs.getBoolean(K_AUDIO, true),
         username = prefs.getString(K_USERNAME, "admin")!!,
         password = prefs.getString(K_PASSWORD, "")!!,

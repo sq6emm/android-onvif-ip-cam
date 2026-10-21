@@ -22,7 +22,7 @@ Every setting can be changed both in the app and over ONVIF:
 |---|---|---|
 | Resolution, fps, bitrate, codec, GOP | Settings | Media `SetVideoEncoderConfiguration` (Media2 for H.265) |
 | Camera (front/back/...) | Settings | Media `SetVideoSourceConfiguration` (`SourceToken`, sources from `GetVideoSources`) |
-| Rotation | Settings | Media `SetVideoSourceConfiguration` (`Extension/Rotate`) |
+| Rotation (auto from the phone position, or fixed 0/90/180/270°) | Settings | Media `SetVideoSourceConfiguration` (`Extension/Rotate`: `AUTO`, `OFF`, `ON` + `Degree`) |
 | Date/time OSD | Settings | Media `CreateOSD` / `DeleteOSD` / `GetOSDs` |
 | Audio on/off | Settings | Media `Add/RemoveAudioEncoderConfiguration` (Media2 `Add/RemoveConfiguration`) |
 | Motion detection, sensitivity | Settings | Analytics `CreateRules` / `DeleteRules` / `ModifyRules` (`MotionDetectorRule`, `Sensitivity` 0..100) |

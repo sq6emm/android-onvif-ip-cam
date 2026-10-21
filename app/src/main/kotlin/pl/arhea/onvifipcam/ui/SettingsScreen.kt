@@ -161,11 +161,13 @@ private fun facingPl(f: String) = when (f) {
     else -> "Zewnętrzna"
 }
 
+// Phone positions in which each fixed rotation gives an upright picture (back camera).
 private fun rotationLabel(r: Int) = when (r) {
-    0 -> "0° (poziomo)"
-    90 -> "90° (pionowo)"
-    180 -> "180° (poziomo, odwrócony)"
-    else -> "270° (pionowo, odwrócony)"
+    CamSettings.ROTATION_AUTO -> "Automatycznie (wg położenia telefonu)"
+    0 -> "0° (telefon pionowo)"
+    90 -> "90° (telefon poziomo, górą w prawo)"
+    180 -> "180° (telefon pionowo, do góry nogami)"
+    else -> "270° (telefon poziomo, górą w lewo)"
 }
 
 @Composable

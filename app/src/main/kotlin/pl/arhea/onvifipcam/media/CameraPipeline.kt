@@ -18,6 +18,9 @@ import pl.arhea.onvifipcam.settings.SettingsStore
 class CameraPipeline(
     private val context: Context,
     private val settings: CamSettings,
+    /** Clockwise rotation applied to the upright camera image (resolved from auto/manual settings). */
+    val rotation: Int,
+    private val sensorOrientation: Int,
     private val main: StreamEndpoint,
     private val sub: StreamEndpoint,
     private val audioAllowed: Boolean,
@@ -28,16 +31,21 @@ class CameraPipeline(
     val mainCodec: VideoCodec =
         if (settings.main.codec == VideoCodec.H265 && !VideoEncoder.isSupported(VideoCodec.H265)) VideoCodec.H264 else settings.main.codec
 
-    private val rotated = settings.rotation == 90 || settings.rotation == 270
-    /** Output sizes in the rotated (viewer) orientation. */
-    val mainSize: Size = settings.main.resolution.let { if (rotated) Size(it.height, it.width) else Size(it.width, it.height) }
-    val subSize: Size = settings.sub.resolution.let { if (rotated) Size(it.height, it.width) else Size(it.width, it.height) }
-
     val captureSize: Size = CameraSource.chooseCaptureSize(
         context, settings.cameraId,
         Size(settings.main.resolution.width, settings.main.resolution.height),
         settings.captureScale, settings.main.fps,
     )
+
+    /**
+     * Camera image size as rendered: the SurfaceTexture transform already turns the sensor image upright
+     * for the phone's natural (portrait) position, then [rotation] is applied clockwise on top.
+     */
+    val sourceSize: Size = if ((sensorOrientation + rotation) % 180 != 0) Size(captureSize.height, captureSize.width) else captureSize
+    private val portrait = sourceSize.height > sourceSize.width
+    /** Output sizes, portrait when the rotated image is portrait (settings store landscape sizes). */
+    val mainSize: Size = settings.main.resolution.let { if (portrait) Size(it.height, it.width) else Size(it.width, it.height) }
+    val subSize: Size = settings.sub.resolution.let { if (portrait) Size(it.height, it.width) else Size(it.width, it.height) }
 
     val ptz: VirtualPtz
     private var camera: CameraSource? = null
@@ -51,9 +59,7 @@ class CameraPipeline(
 
     init {
         // Fraction of the (rotated) source the unzoomed main view covers, for FOV-relative PTZ moves.
-        val sw = (if (rotated) captureSize.height else captureSize.width).toFloat()
-        val sh = (if (rotated) captureSize.width else captureSize.height).toFloat()
-        val srcAspect = sw / sh
+        val srcAspect = sourceSize.width.toFloat() / sourceSize.height
         val dstAspect = mainSize.width.toFloat() / mainSize.height
         val bw = if (srcAspect > dstAspect) dstAspect / srcAspect else 1f
         val bh = if (srcAspect > dstAspect) 1f else srcAspect / dstAspect
@@ -61,8 +67,8 @@ class CameraPipeline(
     }
 
     fun start() {
-        Log.i(TAG, "start: camera ${settings.cameraId} capture $captureSize, main $mainSize $mainCodec, sub $subSize")
-        val r = GlRenderer(captureSize, settings.rotation, if (settings.osdEnabled) OsdText(settings.deviceName) else null, ptz::view)
+        Log.i(TAG, "start: camera ${settings.cameraId} capture $captureSize rotation $rotation, main $mainSize $mainCodec, sub $subSize")
+        val r = GlRenderer(captureSize, sourceSize, rotation, if (settings.osdEnabled) OsdText(settings.deviceName) else null, ptz::view)
         val texture = r.start()
         renderer = r
 

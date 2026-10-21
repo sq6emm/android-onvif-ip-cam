@@ -107,7 +107,7 @@ data class CameraConfig(
     val username: String,
     val sources: List<VideoSourceInfo>,
     val currentSource: String,
-    /** 0, 90, 180, 270 */
+    /** 0, 90, 180, 270 (clockwise), or -1 = automatic (follows how the device is turned) */
     val rotation: Int,
     val osdEnabled: Boolean,
     val audioEnabled: Boolean,

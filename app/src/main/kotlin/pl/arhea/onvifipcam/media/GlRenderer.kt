@@ -27,6 +27,8 @@ data class ViewWindow(val zoom: Float = 1f, val pan: Float = 0f, val tilt: Float
  */
 class GlRenderer(
     private val captureSize: Size,
+    /** Image size after the SurfaceTexture transform and [rotation]; the crop keeps targets undistorted. */
+    private val sourceSize: Size,
     private val rotation: Int,
     private val osd: OsdText?,
     private val view: () -> ViewWindow,
@@ -227,10 +229,7 @@ class GlRenderer(
      * The crop window keeps the target's aspect ratio and is shrunk/moved by the PTZ view.
      */
     private fun computeTexMatrix(targetAspect: Float, v: ViewWindow) {
-        val rotated = rotation == 90 || rotation == 270
-        val sw = (if (rotated) captureSize.height else captureSize.width).toFloat()
-        val sh = (if (rotated) captureSize.width else captureSize.height).toFloat()
-        val srcAspect = sw / sh
+        val srcAspect = sourceSize.width.toFloat() / sourceSize.height
         var bw = 1f
         var bh = 1f
         if (srcAspect > targetAspect) bw = targetAspect / srcAspect else bh = srcAspect / targetAspect

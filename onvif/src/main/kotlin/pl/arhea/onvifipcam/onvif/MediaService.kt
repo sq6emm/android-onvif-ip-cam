@@ -14,13 +14,19 @@ internal object MediaXml {
     val SUB_RESOLUTIONS = listOf(1280 to 720, 960 to 540, 854 to 480, 640 to 360)
 
     const val OSD = "osd_datetime"
+    /** CameraConfig.rotation value for Rotate Mode AUTO. */
+    const val ROTATE_AUTO = -1
     private const val DEFAULT_AUDIO_KBPS = 64
     private const val DEFAULT_AUDIO_RATE = 44100
 
     fun videoSourceConfig(d: OnvifDevice, tag: String = "tt:VideoSourceConfiguration"): String {
         val (w, h) = d.sourceSize()
         val cfg = d.configuration.config()
-        val rotate = if (cfg.rotation == 0) "<tt:Mode>OFF</tt:Mode>" else "<tt:Mode>ON</tt:Mode><tt:Degree>${cfg.rotation}</tt:Degree>"
+        val rotate = when (cfg.rotation) {
+            ROTATE_AUTO -> "<tt:Mode>AUTO</tt:Mode>"
+            0 -> "<tt:Mode>OFF</tt:Mode>"
+            else -> "<tt:Mode>ON</tt:Mode><tt:Degree>${cfg.rotation}</tt:Degree>"
+        }
         return "<$tag token=\"$VSC\"><tt:Name>VideoSourceConfig</tt:Name><tt:UseCount>${d.profiles().size}</tt:UseCount>" +
             "<tt:SourceToken>${esc(cfg.currentSource)}</tt:SourceToken><tt:Bounds x=\"0\" y=\"0\" width=\"$w\" height=\"$h\"/>" +
             "<tt:Extension><tt:Rotate>$rotate</tt:Rotate></tt:Extension></$tag>"
@@ -47,7 +53,7 @@ internal object MediaXml {
             "<tt:WidthRange><tt:Min>$w</tt:Min><tt:Max>$w</tt:Max></tt:WidthRange><tt:HeightRange><tt:Min>$h</tt:Min><tt:Max>$h</tt:Max></tt:HeightRange>" +
             "</tt:BoundsRange>" +
             d.configuration.config().sources.joinToString("") { "<tt:VideoSourceTokensAvailable>${esc(it.token)}</tt:VideoSourceTokensAvailable>" } +
-            "<tt:Extension><tt:Rotate><tt:Mode>OFF</tt:Mode><tt:Mode>ON</tt:Mode>" +
+            "<tt:Extension><tt:Rotate><tt:Mode>OFF</tt:Mode><tt:Mode>ON</tt:Mode><tt:Mode>AUTO</tt:Mode>" +
             "<tt:DegreeList><tt:Items>90</tt:Items><tt:Items>180</tt:Items><tt:Items>270</tt:Items></tt:DegreeList>" +
             "</tt:Rotate></tt:Extension></$tag>"
     }
@@ -57,7 +63,12 @@ internal object MediaXml {
         val source = cfg.childText("SourceToken")
         val rotate = cfg.path("Extension", "Rotate")
         val rotation = rotate?.let { r ->
-            if (r.childText("Mode").equals("OFF", ignoreCase = true)) 0 else r.childText("Degree")?.toIntOrNull() ?: 0
+            when (r.childText("Mode")?.uppercase()) {
+                "OFF" -> 0
+                "AUTO" -> ROTATE_AUTO
+                // ON without Degree means 180 per the ONVIF schema.
+                else -> r.childText("Degree")?.toIntOrNull() ?: 180
+            }
         }
         if (source != null && d.configuration.config().sources.none { it.token == source }) {
             throw Soap.invalidArg("ter:NoVideoSource", "Unknown video source $source")

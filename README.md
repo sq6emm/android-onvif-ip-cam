@@ -42,6 +42,10 @@ battery optimisation exemption, and "display over other apps" for autostart on A
 - Keep the phone on a charger; the app lowers the bitrate when the phone gets hot.
 - PTZ is digital: "PTZ zoom headroom" captures at a higher resolution than the stream so zooming in loses less detail.
 
+## Download
+Prebuilt APKs are on the [Releases](https://github.com/sq6emm/android-onvif-ip-cam/releases) page.
+GitHub Actions builds and tests every push; pushing a `vX.Y.Z` tag publishes a release with the APK.
+
 ## Build (Docker)
 ```sh
 docker/gradle.sh :app:assembleDebug        # APK: app/build/outputs/apk/debug/app-debug.apk

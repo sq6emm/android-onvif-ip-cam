@@ -138,10 +138,6 @@ fun MainScreen(
             status.error?.let { ErrorCard(it) }
             status.cameraStatus?.let { ErrorCard(it) }
             if (!env.hasCamera) ErrorCard("Aplikacja potrzebuje uprawnienia do kamery. Naciśnij „Uruchom kamerę”.")
-
-            StatusCard(status)
-            AddressesCard(status, settings.username, settings.password, settings.authEnabled)
-
             if (!env.ignoringBattery) {
                 ActionCard(
                     "Optymalizacja baterii jest włączona. Android może uśpić kamerę przy wygaszonym ekranie.",
@@ -154,6 +150,10 @@ fun MainScreen(
                     "Nadaj uprawnienie", onRequestOverlay,
                 )
             }
+
+            StatusCard(status)
+            AddressesCard(status, settings.username, settings.password, settings.authEnabled)
+
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Nie wygaszaj ekranu", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)

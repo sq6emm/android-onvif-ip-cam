@@ -36,8 +36,9 @@ Every setting can be changed both in the app and over ONVIF:
 Most changes restart streaming for about a second; credentials, imaging and PTZ apply live.
 
 ## Phone setup tips
-- Disable battery optimisation for the app (the app offers a button).
-- For autostart after reboot on Android 11+ grant "display over other apps".
+The app asks for the permissions it needs on first start (camera, microphone, notifications,
+battery optimisation exemption, and "display over other apps" for autostart on Android 11+).
+
 - Keep the phone on a charger; the app lowers the bitrate when the phone gets hot.
 - PTZ is digital: "PTZ zoom headroom" captures at a higher resolution than the stream so zooming in loses less detail.
 

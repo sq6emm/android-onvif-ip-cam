@@ -1,7 +1,8 @@
 # ONVIF IP Cam
 
 Android app (8.0+) that turns a phone into an IP camera: RTSP (H.264/H.265 + AAC), two streams,
-ONVIF Profile S with digital PTZ, motion events, snapshots and WS-Discovery. Design: [docs/DESIGN.md](docs/DESIGN.md).
+ONVIF Profile S with digital PTZ, motion events, snapshots and WS-Discovery. Design: [docs/DESIGN.md](docs/DESIGN.md),
+client configuration examples: [docs/CLIENTS.md](docs/CLIENTS.md).
 
 ## Endpoints (defaults)
 | What | URL |
@@ -34,31 +35,6 @@ Every setting can be changed both in the app and over ONVIF:
 
 Most changes restart streaming for about a second; credentials, imaging and PTZ apply live.
 
-## Frigate
-```yaml
-go2rtc:
-  streams:
-    phone: rtsp://admin:PASS@PHONE_IP:8554/stream1
-    phone_sub: rtsp://admin:PASS@PHONE_IP:8554/stream2
-cameras:
-  phone:
-    ffmpeg:
-      inputs:
-        - path: rtsp://127.0.0.1:8554/phone
-          roles: [record]
-        - path: rtsp://127.0.0.1:8554/phone_sub
-          roles: [detect]
-    onvif:
-      host: PHONE_IP
-      port: 8080
-      user: admin
-      password: PASS
-```
-
-## Home Assistant
-Settings → Devices → Add integration → ONVIF. The camera is discovered automatically, or enter
-`PHONE_IP`, port `8080`, user and password. Motion arrives as a binary sensor (PullPoint events).
-
 ## Phone setup tips
 - Disable battery optimisation for the app (the app offers a button).
 - For autostart after reboot on Android 11+ grant "display over other apps".
@@ -76,6 +52,6 @@ The APK is signed with the committed `keystore/debug.keystore`, so newer builds 
 - `devserver` runs the same RTSP/ONVIF code on the JVM, fed from files:
   `docker/gradle.sh :devserver:installDist`, then run `devserver/build/install/devserver/bin/devserver`
   with `DATA` (H.264/H.265/AAC files), `CAM_USER`, `CAM_PASS`, `MAIN_CODEC=h264|h265`.
-- `tools/onvif_check.py HOST PORT USER PASS` exercises the ONVIF calls Home Assistant and Frigate make
+- `tools/onvif_check.py HOST PORT USER PASS` exercises the common ONVIF client calls
   (uses `onvif-zeep-async`).
 - `docker/Dockerfile.emulator` is a headless KVM emulator with a virtual camera for end-to-end tests of the APK.

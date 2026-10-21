@@ -62,13 +62,13 @@ fun MainScreen(
     onSettings: () -> Unit,
     onRequestBattery: () -> Unit,
     onRequestOverlay: () -> Unit,
+    keepScreenOn: Boolean,
     onKeepScreenOn: (Boolean) -> Unit,
 ) {
     val status by CameraService.status.collectAsStateWithLifecycle()
     val settings by SettingsStore.settings.collectAsStateWithLifecycle()
     var showPreview by rememberSaveable { mutableStateOf(true) }
     var showLog by rememberSaveable { mutableStateOf(false) }
-    var keepOn by rememberSaveable { mutableStateOf(false) }
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
@@ -157,7 +157,7 @@ fun MainScreen(
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Nie wygaszaj ekranu", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                Switch(checked = keepOn, onCheckedChange = { keepOn = it; onKeepScreenOn(it) })
+                Switch(checked = keepScreenOn, onCheckedChange = onKeepScreenOn)
             }
 
             OutlinedButton(onClick = { showLog = !showLog }) { Text(if (showLog) "Ukryj dziennik" else "Pokaż dziennik") }

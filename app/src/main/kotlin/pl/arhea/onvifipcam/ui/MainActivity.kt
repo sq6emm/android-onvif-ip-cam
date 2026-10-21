@@ -23,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import pl.arhea.onvifipcam.service.CameraService
@@ -38,6 +39,8 @@ class MainActivity : ComponentActivity() {
     private var startAfterPermissions = false
     private var permissionsVersion by mutableIntStateOf(0)
     private var resumeVersion by mutableIntStateOf(0)
+    // Kept here, not in MainScreen, so it survives a visit to the settings screen.
+    private var screenKeptOn by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -54,17 +57,22 @@ class MainActivity : ComponentActivity() {
                     canOverlay = canOverlay(),
                     version = permissionsVersion + resumeVersion,
                 )
-                when (screen) {
-                    Screen.Main -> MainScreen(
-                        env = env,
-                        onStart = ::startCamera,
-                        onStop = { CameraService.stop(this) },
-                        onSettings = { screen = Screen.Settings },
-                        onRequestBattery = ::requestBatteryExemption,
-                        onRequestOverlay = ::requestOverlay,
-                        onKeepScreenOn = { on -> setKeepScreenOn(on) },
-                    )
-                    Screen.Settings -> SettingsScreen(onBack = { screen = Screen.Main })
+                // Keeps each screen's saved UI state (preview, log toggles) while the other one is shown.
+                val saved = rememberSaveableStateHolder()
+                saved.SaveableStateProvider(screen.name) {
+                    when (screen) {
+                        Screen.Main -> MainScreen(
+                            env = env,
+                            onStart = ::startCamera,
+                            onStop = { CameraService.stop(this) },
+                            onSettings = { screen = Screen.Settings },
+                            onRequestBattery = ::requestBatteryExemption,
+                            onRequestOverlay = ::requestOverlay,
+                            keepScreenOn = screenKeptOn,
+                            onKeepScreenOn = ::setKeepScreenOn,
+                        )
+                        Screen.Settings -> SettingsScreen(onBack = { screen = Screen.Main })
+                    }
                 }
             }
         }
@@ -143,6 +151,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun setKeepScreenOn(on: Boolean) {
+        screenKeptOn = on
         if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }

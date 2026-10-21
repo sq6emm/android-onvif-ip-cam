@@ -43,7 +43,7 @@ jobs:
           mkdir -p out
           cp app/build/outputs/apk/release/app-release.apk "out/onvif-ip-cam-${{ steps.version.outputs.name }}.apk"
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: onvif-ip-cam-${{ steps.version.outputs.name }}
           path: out/*.apk
